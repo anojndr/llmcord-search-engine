@@ -18,7 +18,6 @@ logging.basicConfig(
 VISION_MODEL_TAGS = ("gpt-4o", "claude-3", "gemini", "pixtral", "llava", "vision", "vl")
 PROVIDERS_SUPPORTING_USERNAMES = ("openai", "x-ai")
 
-ALLOWED_CHANNEL_TYPES = ("text", "public_thread", "private_thread", "voice", "private")
 ALLOWED_FILE_TYPES = ("image", "text")
 
 EMBED_COLOR_COMPLETE = discord.Color.dark_green()
@@ -73,7 +72,7 @@ async def on_message(new_msg):
 
     is_dm = new_msg.channel.type == discord.ChannelType.private
 
-    if (not is_dm and discord_client.user not in new_msg.mentions) or new_msg.author.bot or str(new_msg.channel.type) not in ALLOWED_CHANNEL_TYPES:
+    if (not is_dm and discord_client.user not in new_msg.mentions) or new_msg.author.bot:
         return
 
     cfg = get_config()
