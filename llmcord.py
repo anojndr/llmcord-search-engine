@@ -11,6 +11,7 @@ from openai import AsyncOpenAI
 import yaml
 
 from search_handler import handle_search_query
+from url_handler import extract_urls_from_text, fetch_urls_content
 
 logging.basicConfig(
     level=logging.INFO,
@@ -107,6 +108,9 @@ async def on_message(new_msg):
     use_plain_responses = cfg["use_plain_responses"]
     max_message_length = 2000 if use_plain_responses else (4096 - len(STREAMING_INDICATOR))
 
+    max_urls = cfg.get('max_urls', 3)
+    max_url_content_length = cfg.get('max_url_content_length', 10000)
+
     is_search_query = False
     augmented_user_message = None
     if new_msg.content.lower().startswith('search'):
@@ -118,6 +122,16 @@ async def on_message(new_msg):
         search_results = await handle_search_query(query, serper_api_key)
         augmented_user_message = f"{new_msg.content}\n\nRespond to my query based on the search results:\n{search_results}"
         is_search_query = True
+
+    urls_in_message = extract_urls_from_text(new_msg.content)
+    is_url_query = False
+    if urls_in_message:
+        urls_in_message = urls_in_message[:max_urls]
+        contents = await fetch_urls_content(urls_in_message, max_content_length=max_url_content_length)
+        augmented_user_message = new_msg.content + "\n\nRespond to my query based on the url content/s:\n"
+        for idx, (url, content) in enumerate(zip(urls_in_message, contents), start=1):
+            augmented_user_message += f"url {idx}:\n{url}\nurl {idx} content:\n{content}\n\n"
+        is_url_query = True
 
     # Build message chain and set user warnings
     messages = []
@@ -138,7 +152,7 @@ async def on_message(new_msg):
                 if curr_node.text.startswith(discord_client.user.mention):
                     curr_node.text = curr_node.text.replace(discord_client.user.mention, "", 1).lstrip()
 
-                if is_search_query and curr_msg.id == new_msg.id:
+                if (curr_msg.id == new_msg.id) and (is_search_query or is_url_query):
                     curr_node.text = augmented_user_message
 
                 curr_node.images = [

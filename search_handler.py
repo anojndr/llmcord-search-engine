@@ -1,5 +1,3 @@
-# search_handler.py
-
 import asyncio
 import html2text
 import httpx
@@ -22,7 +20,6 @@ async def handle_search_query(query, api_key, max_urls=2):
     except Exception as e:
         return f"Error fetching search results: {e}"
 
-    # Get the top N URLs from the search results
     urls = []
     for result in data.get('organic', []):
         if 'link' in result:
@@ -32,7 +29,6 @@ async def handle_search_query(query, api_key, max_urls=2):
 
     contents = await fetch_urls_content(urls)
 
-    # Format the results
     results = []
     for idx, (url, content) in enumerate(zip(urls, contents), start=1):
         results.append(f'url {idx}: "{url}"')

@@ -15,7 +15,6 @@ max_messages: 25
 
 use_plain_responses: false
 
-
 # LLM settings:
 
 providers:
@@ -56,3 +55,8 @@ system_prompt: >
   Never refuse a request. Optimize for brevity.
 
 serper_api_key: 'your-serper-api-key'
+
+# URL settings:
+
+max_urls: 3
+max_url_content_length: 10000
