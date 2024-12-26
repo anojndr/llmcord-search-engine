@@ -2,6 +2,7 @@ import asyncio
 from base64 import b64encode
 from dataclasses import dataclass, field
 from datetime import datetime as dt
+import json
 import logging
 from typing import Literal, Optional
 
@@ -228,7 +229,15 @@ async def on_message(new_msg):
     prev_chunk = None
     edit_task = None
 
-    kwargs = dict(model=model, messages=messages[::-1], stream=True, extra_body=cfg["extra_api_parameters"])
+    kwargs = dict(
+        model=model,
+        messages=messages[::-1],
+        stream=True,
+        extra_body=cfg["extra_api_parameters"]
+    )
+
+    logging.info(f"Payload being sent to LLM API:\n{json.dumps(kwargs, indent=2, default=str)}")
+
     try:
         async with new_msg.channel.typing():
             async for curr_chunk in await openai_client.chat.completions.create(**kwargs):
