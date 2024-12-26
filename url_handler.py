@@ -10,7 +10,7 @@ def extract_urls_from_text(text):
     urls = re.findall(url_pattern, text)
     return urls
 
-async def fetch_urls_content(urls, max_content_length=10000, config=None):
+async def fetch_urls_content(urls, config=None):
     if config is None:
         config = {}
 
@@ -20,7 +20,7 @@ async def fetch_urls_content(urls, max_content_length=10000, config=None):
             if not api_key:
                 return "YouTube API key not set in config."
             content = await fetch_youtube_content(url, api_key)
-            return content[:max_content_length]
+            return content
         elif 'reddit.com' in url or 'redd.it' in url:
             client_id = config.get('reddit_client_id', '')
             client_secret = config.get('reddit_client_secret', '')
@@ -28,7 +28,7 @@ async def fetch_urls_content(urls, max_content_length=10000, config=None):
             if not client_id or not client_secret:
                 return "Reddit API credentials not set in config."
             content = await fetch_reddit_content(url, client_id, client_secret, user_agent)
-            return content[:max_content_length]
+            return content
         else:
             try:
                 async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
@@ -39,7 +39,6 @@ async def fetch_urls_content(urls, max_content_length=10000, config=None):
                         text_content = html2text.html2text(html_content)
                     else:
                         text_content = response.text
-                    text_content = text_content[:max_content_length]
                     return text_content.strip()
             except Exception as e:
                 return f"Error fetching content from {url}: {e}"

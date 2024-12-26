@@ -13,6 +13,7 @@ import yaml
 
 from search_handler import handle_search_query
 from url_handler import extract_urls_from_text, fetch_urls_content
+from rephraser_handler import rephrase_query
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,11 +42,15 @@ def get_config(filename="config.yaml"):
 cfg = get_config()
 
 if client_id := cfg["client_id"]:
-    logging.info(f"\n\nBOT INVITE URL:\nhttps://discord.com/api/oauth2/authorize?client_id={client_id}&permissions=412317273088&scope=bot\n")
+    logging.info(
+        f"\n\nBOT INVITE URL:\nhttps://discord.com/api/oauth2/authorize?client_id={client_id}&permissions=412317273088&scope=bot\n"
+    )
 
 intents = discord.Intents.default()
 intents.message_content = True
-activity = discord.CustomActivity(name=(cfg["status_message"] or "github.com/jakobdylanc/llmcord")[:128])
+activity = discord.CustomActivity(
+    name=(cfg["status_message"] or "github.com/jakobdylanc/llmcord")[:128]
+)
 discord_client = discord.Client(intents=intents, activity=activity)
 
 httpx_client = httpx.AsyncClient()
@@ -86,10 +91,25 @@ async def on_message(new_msg):
     allowed_role_ids = cfg["allowed_role_ids"]
     blocked_user_ids = cfg["blocked_user_ids"]
 
-    channel_ids = tuple(id for id in (new_msg.channel.id, getattr(new_msg.channel, "parent_id", None), getattr(new_msg.channel, "category_id", None)) if id)
+    channel_ids = tuple(
+        id
+        for id in (
+            new_msg.channel.id,
+            getattr(new_msg.channel, "parent_id", None),
+            getattr(new_msg.channel, "category_id", None),
+        )
+        if id
+    )
 
-    is_bad_channel = (is_dm and not allow_dms) or (not is_dm and allowed_channel_ids and not any(id in allowed_channel_ids for id in channel_ids))
-    is_bad_user = new_msg.author.id in blocked_user_ids or (allowed_role_ids and not any(role.id in allowed_role_ids for role in getattr(new_msg.author, "roles", [])))
+    is_bad_channel = (is_dm and not allow_dms) or (
+        not is_dm
+        and allowed_channel_ids
+        and not any(id in allowed_channel_ids for id in channel_ids)
+    )
+    is_bad_user = new_msg.author.id in blocked_user_ids or (
+        allowed_role_ids
+        and not any(role.id in allowed_role_ids for role in getattr(new_msg.author, "roles", []))
+    )
 
     if is_bad_channel or is_bad_user:
         return
@@ -109,26 +129,11 @@ async def on_message(new_msg):
     use_plain_responses = cfg["use_plain_responses"]
     max_message_length = 2000 if use_plain_responses else (4096 - len(STREAMING_INDICATOR))
 
-    max_urls = cfg.get('max_urls', 3)
-    max_url_content_length = cfg.get('max_url_content_length', 10000)
-
-    is_search_query = False
-    augmented_user_message = None
-    if new_msg.content.lower().startswith('search'):
-        query = new_msg.content[len('search'):].strip()
-        serper_api_key = cfg.get('serper_api_key')
-        if not serper_api_key:
-            await new_msg.channel.send('Serper API key not set in config.')
-            return
-        search_results = await handle_search_query(query, serper_api_key, config=cfg)
-        augmented_user_message = f"{new_msg.content}\n\nRespond to my query based on the search results:\n{search_results}"
-        is_search_query = True
-
     urls_in_message = extract_urls_from_text(new_msg.content)
     is_url_query = False
+    augmented_user_message = None
     if urls_in_message:
-        urls_in_message = urls_in_message[:max_urls]
-        contents = await fetch_urls_content(urls_in_message, max_content_length=max_url_content_length, config=cfg)
+        contents = await fetch_urls_content(urls_in_message, config=cfg)
         augmented_user_message = new_msg.content + "\n\nRespond to my query based on the url content/s:\n"
         for idx, (url, content) in enumerate(zip(urls_in_message, contents), start=1):
             augmented_user_message += f"url {idx}:\n{url}\nurl {idx} content:\n{content}\n\n"
@@ -143,37 +148,57 @@ async def on_message(new_msg):
 
         async with curr_node.lock:
             if curr_node.text == None:
-                good_attachments = {type: [att for att in curr_msg.attachments if att.content_type and type in att.content_type] for type in ALLOWED_FILE_TYPES}
+                good_attachments = {
+                    type: [att for att in curr_msg.attachments if att.content_type and type in att.content_type]
+                    for type in ALLOWED_FILE_TYPES
+                }
 
                 curr_node.text = "\n".join(
                     ([curr_msg.content] if curr_msg.content else [])
                     + [embed.description for embed in curr_msg.embeds if embed.description]
-                    + [(await httpx_client.get(att.url)).text for att in good_attachments["text"]]
+                    + [
+                        (await httpx_client.get(att.url)).text
+                        for att in good_attachments["text"]
+                    ]
                 )
                 if curr_node.text.startswith(discord_client.user.mention):
                     curr_node.text = curr_node.text.replace(discord_client.user.mention, "", 1).lstrip()
 
-                if (curr_msg.id == new_msg.id) and (is_search_query or is_url_query):
+                if (curr_msg.id == new_msg.id) and is_url_query:
                     curr_node.text = augmented_user_message
 
                 curr_node.images = [
-                    dict(type="image_url", image_url=dict(url=f"data:{att.content_type};base64,{b64encode((await httpx_client.get(att.url)).content).decode('utf-8')}"))
+                    dict(
+                        type="image_url",
+                        image_url=dict(
+                            url=f"data:{att.content_type};base64,{b64encode((await httpx_client.get(att.url)).content).decode('utf-8')}"
+                        ),
+                    )
                     for att in good_attachments["image"]
                 ]
 
-                curr_node.role = "assistant" if curr_msg.author == discord_client.user else "user"
+                curr_node.role = (
+                    "assistant" if curr_msg.author == discord_client.user else "user"
+                )
 
                 curr_node.user_id = curr_msg.author.id if curr_node.role == "user" else None
 
-                curr_node.has_bad_attachments = len(curr_msg.attachments) > sum(len(att_list) for att_list in good_attachments.values())
+                curr_node.has_bad_attachments = len(curr_msg.attachments) > sum(
+                    len(att_list) for att_list in good_attachments.values()
+                )
 
                 try:
                     if (
                         not curr_msg.reference
                         and discord_client.user.mention not in curr_msg.content
-                        and (prev_msg_in_channel := ([m async for m in curr_msg.channel.history(before=curr_msg, limit=1)] or [None])[0])
+                        and (
+                            prev_msg_in_channel := (
+                                [m async for m in curr_msg.channel.history(before=curr_msg, limit=1)] or [None]
+                            )[0]
+                        )
                         and any(prev_msg_in_channel.type == type for type in (discord.MessageType.default, discord.MessageType.reply))
-                        and prev_msg_in_channel.author == (discord_client.user if curr_msg.channel.type == discord.ChannelType.private else curr_msg.author)
+                        and prev_msg_in_channel.author
+                        == (discord_client.user if curr_msg.channel.type == discord.ChannelType.private else curr_msg.author)
                     ):
                         curr_node.next_msg = prev_msg_in_channel
                     else:
@@ -182,16 +207,25 @@ async def on_message(new_msg):
 
                         if next_msg_id := curr_msg.channel.id if next_is_parent_msg else getattr(curr_msg.reference, "message_id", None):
                             if next_is_parent_msg:
-                                curr_node.next_msg = curr_msg.channel.starter_message or await curr_msg.channel.parent.fetch_message(next_msg_id)
+                                curr_node.next_msg = (
+                                    curr_msg.channel.starter_message
+                                    or await curr_msg.channel.parent.fetch_message(next_msg_id)
+                                )
                             else:
-                                curr_node.next_msg = curr_msg.reference.cached_message or await curr_msg.channel.fetch_message(next_msg_id)
+                                curr_node.next_msg = (
+                                    curr_msg.reference.cached_message
+                                    or await curr_msg.channel.fetch_message(next_msg_id)
+                                )
 
                 except (discord.NotFound, discord.HTTPException, AttributeError):
                     logging.exception("Error fetching next message in the chain")
                     curr_node.fetch_next_failed = True
 
             if curr_node.images[:max_images]:
-                content = ([dict(type="text", text=curr_node.text[:max_text])] if curr_node.text[:max_text] else []) + curr_node.images[:max_images]
+                content = (
+                    ([dict(type="text", text=curr_node.text[:max_text])] if curr_node.text[:max_text] else [])
+                    + curr_node.images[:max_images]
+                )
             else:
                 content = curr_node.text[:max_text]
 
@@ -205,7 +239,11 @@ async def on_message(new_msg):
             if len(curr_node.text) > max_text:
                 user_warnings.add(f"⚠️ Max {max_text:,} characters per message")
             if len(curr_node.images) > max_images:
-                user_warnings.add(f"⚠️ Max {max_images} image{'' if max_images == 1 else 's'} per message" if max_images > 0 else "⚠️ Can't see images")
+                user_warnings.add(
+                    f"⚠️ Max {max_images} image{'' if max_images == 1 else 's'} per message"
+                    if max_images > 0
+                    else "⚠️ Can't see images"
+                )
             if curr_node.has_bad_attachments:
                 user_warnings.add("⚠️ Unsupported attachments")
             if curr_node.fetch_next_failed or (curr_node.next_msg != None and len(messages) == max_messages):
@@ -213,15 +251,37 @@ async def on_message(new_msg):
 
             curr_msg = curr_node.next_msg
 
-    logging.info(f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}")
+    logging.info(
+        f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}"
+    )
 
     if system_prompt := cfg["system_prompt"]:
-        system_prompt_extras = [f"Today's date: {dt.now().strftime('%B %d %Y')}."]
+        system_prompt_extras = [f"Today's date: {dt.now().strftime('%B %d, %Y')}."]
+
         if accept_usernames:
-            system_prompt_extras.append("User's names are their Discord IDs and should be typed as '<@ID>'.")
+            system_prompt_extras.append(
+                "User's names are their Discord IDs and should be typed as '<@ID>'."
+            )
 
         full_system_prompt = "\n".join([system_prompt] + system_prompt_extras)
         messages.append(dict(role="system", content=full_system_prompt))
+
+    if not is_url_query:
+        latest_user_query = await rephrase_query(messages, cfg)
+        if latest_user_query != 'not_needed':
+            serper_api_key = cfg.get('serper_api_key')
+            if not serper_api_key:
+                await new_msg.channel.send('Serper API key not set in config.')
+                return
+            search_results = await handle_search_query(latest_user_query, serper_api_key, config=cfg)
+            augmented_user_message = new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
+            for message in messages:
+                if message['role'] == 'user':
+                    message['content'] = augmented_user_message
+                    msg_nodes[new_msg.id].text = augmented_user_message
+                    break
+
+    messages = messages[::-1]
 
     # Generate and send response message(s) (can be multiple if response is long)
     response_msgs = []
@@ -231,9 +291,9 @@ async def on_message(new_msg):
 
     kwargs = dict(
         model=model,
-        messages=messages[::-1],
+        messages=messages,
         stream=True,
-        extra_body=cfg["extra_api_parameters"]
+        extra_body=cfg["extra_api_parameters"],
     )
 
     logging.info(f"Payload being sent to LLM API:\n{json.dumps(kwargs, indent=2, default=str)}")
@@ -241,7 +301,9 @@ async def on_message(new_msg):
     try:
         async with new_msg.channel.typing():
             async for curr_chunk in await openai_client.chat.completions.create(**kwargs):
-                prev_content = prev_chunk.choices[0].delta.content if prev_chunk != None and prev_chunk.choices[0].delta.content else ""
+                prev_content = (
+                    prev_chunk.choices[0].delta.content if prev_chunk != None and prev_chunk.choices[0].delta.content else ""
+                )
                 curr_content = curr_chunk.choices[0].delta.content or ""
 
                 if response_contents or prev_content:
@@ -249,7 +311,10 @@ async def on_message(new_msg):
                         response_contents.append("")
 
                         if not use_plain_responses:
-                            embed = discord.Embed(description=(prev_content + STREAMING_INDICATOR), color=EMBED_COLOR_INCOMPLETE)
+                            embed = discord.Embed(
+                                description=(prev_content + STREAMING_INDICATOR),
+                                color=EMBED_COLOR_INCOMPLETE,
+                            )
                             for warning in sorted(user_warnings):
                                 embed.add_field(name=warning, value="", inline=False)
 
@@ -265,17 +330,28 @@ async def on_message(new_msg):
                     if not use_plain_responses:
                         finish_reason = curr_chunk.choices[0].finish_reason
 
-                        ready_to_edit = (edit_task == None or edit_task.done()) and dt.now().timestamp() - last_task_time >= EDIT_DELAY_SECONDS
+                        ready_to_edit = (
+                            (edit_task == None or edit_task.done())
+                            and dt.now().timestamp() - last_task_time >= EDIT_DELAY_SECONDS
+                        )
                         msg_split_incoming = len(response_contents[-1] + curr_content) > max_message_length
                         is_final_edit = finish_reason != None or msg_split_incoming
-                        is_good_finish = finish_reason != None and any(finish_reason.lower() == x for x in ("stop", "end_turn"))
+                        is_good_finish = finish_reason != None and any(
+                            finish_reason.lower() == x for x in ("stop", "end_turn")
+                        )
 
                         if ready_to_edit or is_final_edit:
                             if edit_task != None:
                                 await edit_task
 
-                            embed.description = response_contents[-1] if is_final_edit else (response_contents[-1] + STREAMING_INDICATOR)
-                            embed.color = EMBED_COLOR_COMPLETE if msg_split_incoming or is_good_finish else EMBED_COLOR_INCOMPLETE
+                            embed.description = (
+                                response_contents[-1]
+                                if is_final_edit
+                                else (response_contents[-1] + STREAMING_INDICATOR)
+                            )
+                            embed.color = (
+                                EMBED_COLOR_COMPLETE if msg_split_incoming or is_good_finish else EMBED_COLOR_INCOMPLETE
+                            )
                             edit_task = asyncio.create_task(response_msgs[-1].edit(embed=embed))
                             last_task_time = dt.now().timestamp()
 
