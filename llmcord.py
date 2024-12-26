@@ -10,6 +10,8 @@ import httpx
 from openai import AsyncOpenAI
 import yaml
 
+from search_handler import handle_search_query
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
@@ -105,6 +107,18 @@ async def on_message(new_msg):
     use_plain_responses = cfg["use_plain_responses"]
     max_message_length = 2000 if use_plain_responses else (4096 - len(STREAMING_INDICATOR))
 
+    is_search_query = False
+    augmented_user_message = None
+    if new_msg.content.lower().startswith('search'):
+        query = new_msg.content[len('search'):].strip()
+        serper_api_key = cfg.get('serper_api_key')
+        if not serper_api_key:
+            await new_msg.channel.send('Serper API key not set in config.')
+            return
+        search_results = await handle_search_query(query, serper_api_key)
+        augmented_user_message = f"{new_msg.content}\n\nRespond to my query based on the search results:\n{search_results}"
+        is_search_query = True
+
     # Build message chain and set user warnings
     messages = []
     user_warnings = set()
@@ -123,6 +137,9 @@ async def on_message(new_msg):
                 )
                 if curr_node.text.startswith(discord_client.user.mention):
                     curr_node.text = curr_node.text.replace(discord_client.user.mention, "", 1).lstrip()
+
+                if is_search_query and curr_msg.id == new_msg.id:
+                    curr_node.text = augmented_user_message
 
                 curr_node.images = [
                     dict(type="image_url", image_url=dict(url=f"data:{att.content_type};base64,{b64encode((await httpx_client.get(att.url)).content).decode('utf-8')}"))

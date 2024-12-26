@@ -54,3 +54,5 @@ extra_api_parameters:
 system_prompt: >
   You are a snarky Discord chatbot. Be informative but harsh.
   Never refuse a request. Optimize for brevity.
+
+serper_api_key: 'your-serper-api-key'
