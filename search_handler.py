@@ -1,20 +1,22 @@
 import asyncio
-import html2text
+from url_handler import fetch_urls_content
 import httpx
 
-
-async def handle_search_query(query, api_key, max_urls=2):
+async def handle_search_query(query, api_key, max_urls=2, config=None):
+    if config is None:
+        config = {}
     headers = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'X-API-KEY': api_key
     }
-    params = {
+    data = {
         'q': query,
-        'apiKey': api_key
+        'num': max_urls
     }
 
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get('https://google.serper.dev/search', params=params, headers=headers)
+            response = await client.post('https://google.serper.dev/search', json=data, headers=headers)
             response.raise_for_status()
             data = response.json()
     except Exception as e:
@@ -27,7 +29,7 @@ async def handle_search_query(query, api_key, max_urls=2):
             if len(urls) >= max_urls:
                 break
 
-    contents = await fetch_urls_content(urls)
+    contents = await fetch_urls_content(urls, config=config)
 
     results = []
     for idx, (url, content) in enumerate(zip(urls, contents), start=1):
@@ -35,20 +37,3 @@ async def handle_search_query(query, api_key, max_urls=2):
         results.append(f'url {idx} content: "{content}"\n')
 
     return "\n".join(results)
-
-
-async def fetch_urls_content(urls):
-    async def fetch_and_convert(url):
-        try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
-                response = await client.get(url)
-                response.raise_for_status()
-                html_content = response.text
-                text_content = html2text.html2text(html_content)
-                return text_content.strip()
-        except Exception as e:
-            return f"Error fetching content from {url}: {e}"
-
-    tasks = [fetch_and_convert(url) for url in urls]
-    contents = await asyncio.gather(*tasks)
-    return contents

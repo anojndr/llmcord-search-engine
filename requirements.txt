@@ -2,3 +2,7 @@ discord.py
 httpx
 openai
 pyyaml
+html2text
+google-api-python-client
+youtube-transcript-api
+asyncpraw

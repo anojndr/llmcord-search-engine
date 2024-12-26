@@ -120,7 +120,7 @@ async def on_message(new_msg):
         if not serper_api_key:
             await new_msg.channel.send('Serper API key not set in config.')
             return
-        search_results = await handle_search_query(query, serper_api_key)
+        search_results = await handle_search_query(query, serper_api_key, config=cfg)
         augmented_user_message = f"{new_msg.content}\n\nRespond to my query based on the search results:\n{search_results}"
         is_search_query = True
 
@@ -128,7 +128,7 @@ async def on_message(new_msg):
     is_url_query = False
     if urls_in_message:
         urls_in_message = urls_in_message[:max_urls]
-        contents = await fetch_urls_content(urls_in_message, max_content_length=max_url_content_length)
+        contents = await fetch_urls_content(urls_in_message, max_content_length=max_url_content_length, config=cfg)
         augmented_user_message = new_msg.content + "\n\nRespond to my query based on the url content/s:\n"
         for idx, (url, content) in enumerate(zip(urls_in_message, contents), start=1):
             augmented_user_message += f"url {idx}:\n{url}\nurl {idx} content:\n{content}\n\n"
