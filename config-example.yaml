@@ -45,14 +45,21 @@ providers:
     base_url: http://localhost:1337/v1
 
 model: openai/gpt-4o
-rephraser_model: openai/gpt-3.5-turbo  # Add this line
 
 extra_api_parameters:
   max_tokens: 4096
   temperature: 1.0
 
-rephraser_extra_api_parameters:  # Optional extra parameters for the rephraser model
-  max_tokens: 500
+rephraser_model: openai/gpt-4o-mini
+
+rephraser_extra_api_parameters:
+  max_tokens: 4096
+  temperature: 0.7
+
+query_splitter_model: openai/gpt-4o-mini
+
+query_splitter_extra_api_parameters:
+  max_tokens: 4096
   temperature: 0.7
 
 system_prompt: >

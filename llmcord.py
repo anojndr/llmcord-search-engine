@@ -14,6 +14,7 @@ import yaml
 from search_handler import handle_search_query
 from url_handler import extract_urls_from_text, fetch_urls_content
 from rephraser_handler import rephrase_query
+from query_splitter_handler import split_query
 
 logging.basicConfig(
     level=logging.INFO,
@@ -266,22 +267,31 @@ async def on_message(new_msg):
         full_system_prompt = "\n".join([system_prompt] + system_prompt_extras)
         messages.append(dict(role="system", content=full_system_prompt))
 
+    messages = messages[::-1]
+
     if not is_url_query:
         latest_user_query = await rephrase_query(messages, cfg)
         if latest_user_query != 'not_needed':
+            split_queries = await split_query(latest_user_query, cfg)
             serper_api_key = cfg.get('serper_api_key')
             if not serper_api_key:
                 await new_msg.channel.send('Serper API key not set in config.')
                 return
-            search_results = await handle_search_query(latest_user_query, serper_api_key, config=cfg)
+
+            search_results_list = await asyncio.gather(
+                *[handle_search_query(q, serper_api_key, config=cfg) for q in split_queries]
+            )
+
+            search_results = ""
+            for idx, (query, result) in enumerate(zip(split_queries, search_results_list), start=1):
+                search_results += f"Results for query {idx} ('{query}'):\n{result}\n\n"
+
             augmented_user_message = new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
             for message in messages:
                 if message['role'] == 'user':
                     message['content'] = augmented_user_message
                     msg_nodes[new_msg.id].text = augmented_user_message
                     break
-
-    messages = messages[::-1]
 
     # Generate and send response message(s) (can be multiple if response is long)
     response_msgs = []
@@ -364,7 +374,7 @@ async def on_message(new_msg):
                 msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
                 await msg_nodes[response_msg.id].lock.acquire()
                 response_msgs.append(response_msg)
-    except:
+    except Exception:
         logging.exception("Error while generating response")
 
     for response_msg in response_msgs:
