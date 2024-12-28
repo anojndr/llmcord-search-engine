@@ -75,6 +75,8 @@ class MsgNode:
 
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
+    serper_queries: Optional[list] = None
+
 
 @discord_client.event
 async def on_message(new_msg):
@@ -148,7 +150,7 @@ async def on_message(new_msg):
         curr_node = msg_nodes.setdefault(curr_msg.id, MsgNode())
 
         async with curr_node.lock:
-            if curr_node.text == None:
+            if curr_node.text is None:
                 good_attachments = {
                     type: [att for att in curr_msg.attachments if att.content_type and type in att.content_type]
                     for type in ALLOWED_FILE_TYPES
@@ -206,7 +208,8 @@ async def on_message(new_msg):
                         is_public_thread = curr_msg.channel.type == discord.ChannelType.public_thread
                         next_is_parent_msg = not curr_msg.reference and is_public_thread and curr_msg.channel.parent.type == discord.ChannelType.text
 
-                        if next_msg_id := curr_msg.channel.id if next_is_parent_msg else getattr(curr_msg.reference, "message_id", None):
+                        next_msg_id = curr_msg.channel.id if next_is_parent_msg else getattr(curr_msg.reference, "message_id", None)
+                        if next_msg_id:
                             if next_is_parent_msg:
                                 curr_node.next_msg = (
                                     curr_msg.channel.starter_message
@@ -217,7 +220,6 @@ async def on_message(new_msg):
                                     curr_msg.reference.cached_message
                                     or await curr_msg.channel.fetch_message(next_msg_id)
                                 )
-
                 except (discord.NotFound, discord.HTTPException, AttributeError):
                     logging.exception("Error fetching next message in the chain")
                     curr_node.fetch_next_failed = True
@@ -232,7 +234,7 @@ async def on_message(new_msg):
 
             if content != "":
                 message = dict(content=content, role=curr_node.role)
-                if accept_usernames and curr_node.user_id != None:
+                if accept_usernames and curr_node.user_id is not None:
                     message["name"] = str(curr_node.user_id)
 
                 messages.append(message)
@@ -247,7 +249,7 @@ async def on_message(new_msg):
                 )
             if curr_node.has_bad_attachments:
                 user_warnings.add("⚠️ Unsupported attachments")
-            if curr_node.fetch_next_failed or (curr_node.next_msg != None and len(messages) == max_messages):
+            if curr_node.fetch_next_failed or (curr_node.next_msg is not None and len(messages) == max_messages):
                 user_warnings.add(f"⚠️ Only using last {len(messages)} message{'' if len(messages) == 1 else 's'}")
 
             curr_msg = curr_node.next_msg
@@ -278,6 +280,8 @@ async def on_message(new_msg):
                 await new_msg.channel.send('Serper API key not set in config.')
                 return
 
+            msg_nodes[new_msg.id].serper_queries = split_queries
+
             search_results_list = await asyncio.gather(
                 *[handle_search_query(q, serper_api_key, config=cfg) for q in split_queries]
             )
@@ -299,6 +303,14 @@ async def on_message(new_msg):
     prev_chunk = None
     edit_task = None
 
+    searched_for_text_added = False
+    serper_queries = getattr(msg_nodes[new_msg.id], 'serper_queries', None)
+    if serper_queries:
+        search_queries_text = ', '.join(f'"{q}"' for q in serper_queries)
+        searched_for_text = f'searched for: {search_queries_text}\n\n'
+    else:
+        searched_for_text = ''
+
     kwargs = dict(
         model=model,
         messages=messages,
@@ -312,7 +324,7 @@ async def on_message(new_msg):
         async with new_msg.channel.typing():
             async for curr_chunk in await openai_client.chat.completions.create(**kwargs):
                 prev_content = (
-                    prev_chunk.choices[0].delta.content if prev_chunk != None and prev_chunk.choices[0].delta.content else ""
+                    prev_chunk.choices[0].delta.content if prev_chunk is not None and prev_chunk.choices[0].delta.content else ""
                 )
                 curr_content = curr_chunk.choices[0].delta.content or ""
 
@@ -320,9 +332,13 @@ async def on_message(new_msg):
                     if response_contents == [] or len(response_contents[-1] + prev_content) > max_message_length:
                         response_contents.append("")
 
+                        if not searched_for_text_added and searched_for_text:
+                            response_contents[-1] = searched_for_text
+                            searched_for_text_added = True
+
                         if not use_plain_responses:
                             embed = discord.Embed(
-                                description=(prev_content + STREAMING_INDICATOR),
+                                description=(response_contents[-1] + prev_content + STREAMING_INDICATOR),
                                 color=EMBED_COLOR_INCOMPLETE,
                             )
                             for warning in sorted(user_warnings):
@@ -341,17 +357,17 @@ async def on_message(new_msg):
                         finish_reason = curr_chunk.choices[0].finish_reason
 
                         ready_to_edit = (
-                            (edit_task == None or edit_task.done())
+                            (edit_task is None or edit_task.done())
                             and dt.now().timestamp() - last_task_time >= EDIT_DELAY_SECONDS
                         )
                         msg_split_incoming = len(response_contents[-1] + curr_content) > max_message_length
-                        is_final_edit = finish_reason != None or msg_split_incoming
-                        is_good_finish = finish_reason != None and any(
+                        is_final_edit = finish_reason is not None or msg_split_incoming
+                        is_good_finish = finish_reason is not None and any(
                             finish_reason.lower() == x for x in ("stop", "end_turn")
                         )
 
                         if ready_to_edit or is_final_edit:
-                            if edit_task != None:
+                            if edit_task is not None:
                                 await edit_task
 
                             embed.description = (
