@@ -21,7 +21,15 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s: %(message)s",
 )
 
-VISION_MODEL_TAGS = ("gpt-4o", "claude-3", "gemini", "pixtral", "llava", "vision", "vl")
+VISION_MODEL_TAGS = (
+    "gpt-4o",
+    "claude-3",
+    "gemini",
+    "pixtral",
+    "llava",
+    "vision",
+    "vl",
+)
 PROVIDERS_SUPPORTING_USERNAMES = ("openai", "x-ai")
 
 ALLOWED_FILE_TYPES = ("image", "text")
@@ -113,7 +121,9 @@ async def on_message(new_msg):
     )
     is_bad_user = new_msg.author.id in blocked_user_ids or (
         allowed_role_ids
-        and not any(role.id in allowed_role_ids for role in getattr(new_msg.author, "roles", []))
+        and not any(
+            role.id in allowed_role_ids for role in getattr(new_msg.author, "roles", [])
+        )
     )
 
     if is_bad_channel or is_bad_user:
@@ -132,16 +142,22 @@ async def on_message(new_msg):
     max_messages = cfg["max_messages"]
 
     use_plain_responses = cfg["use_plain_responses"]
-    max_message_length = 2000 if use_plain_responses else (4096 - len(STREAMING_INDICATOR))
+    max_message_length = (
+        2000 if use_plain_responses else (4096 - len(STREAMING_INDICATOR))
+    )
 
     urls_in_message = extract_urls_from_text(new_msg.content)
     is_url_query = False
     augmented_user_message = None
     if urls_in_message:
         contents = await fetch_urls_content(urls_in_message, config=cfg)
-        augmented_user_message = new_msg.content + "\n\nRespond to my query based on the url content/s:\n"
+        augmented_user_message = (
+            new_msg.content + "\n\nRespond to my query based on the url content/s:\n"
+        )
         for idx, (url, content) in enumerate(zip(urls_in_message, contents), start=1):
-            augmented_user_message += f"url {idx}:\n{url}\nurl {idx} content:\n{content}\n\n"
+            augmented_user_message += (
+                f"url {idx}:\n{url}\nurl {idx} content:\n{content}\n\n"
+            )
         is_url_query = True
 
     # Build message chain and set user warnings
@@ -154,7 +170,11 @@ async def on_message(new_msg):
         async with curr_node.lock:
             if curr_node.text is None:
                 good_attachments = {
-                    type: [att for att in curr_msg.attachments if att.content_type and type in att.content_type]
+                    type: [
+                        att
+                        for att in curr_msg.attachments
+                        if att.content_type and type in att.content_type
+                    ]
                     for type in ALLOWED_FILE_TYPES
                 }
 
@@ -167,7 +187,9 @@ async def on_message(new_msg):
                     ]
                 )
                 if curr_node.text.startswith(discord_client.user.mention):
-                    curr_node.text = curr_node.text.replace(discord_client.user.mention, "", 1).lstrip()
+                    curr_node.text = curr_node.text.replace(
+                        discord_client.user.mention, "", 1
+                    ).lstrip()
 
                 if (curr_msg.id == new_msg.id) and is_url_query:
                     curr_node.text = augmented_user_message
@@ -186,7 +208,9 @@ async def on_message(new_msg):
                     "assistant" if curr_msg.author == discord_client.user else "user"
                 )
 
-                curr_node.user_id = curr_msg.author.id if curr_node.role == "user" else None
+                curr_node.user_id = (
+                    curr_msg.author.id if curr_node.role == "user" else None
+                )
 
                 curr_node.has_bad_attachments = len(curr_msg.attachments) > sum(
                     len(att_list) for att_list in good_attachments.values()
@@ -198,24 +222,52 @@ async def on_message(new_msg):
                         and discord_client.user.mention not in curr_msg.content
                         and (
                             prev_msg_in_channel := (
-                                [m async for m in curr_msg.channel.history(before=curr_msg, limit=1)] or [None]
+                                [
+                                    m
+                                    async for m in curr_msg.channel.history(
+                                        before=curr_msg, limit=1
+                                    )
+                                ]
+                                or [None]
                             )[0]
                         )
-                        and any(prev_msg_in_channel.type == type for type in (discord.MessageType.default, discord.MessageType.reply))
+                        and any(
+                            prev_msg_in_channel.type == type
+                            for type in (
+                                discord.MessageType.default,
+                                discord.MessageType.reply,
+                            )
+                        )
                         and prev_msg_in_channel.author
-                        == (discord_client.user if curr_msg.channel.type == discord.ChannelType.private else curr_msg.author)
+                        == (
+                            discord_client.user
+                            if curr_msg.channel.type == discord.ChannelType.private
+                            else curr_msg.author
+                        )
                     ):
                         curr_node.next_msg = prev_msg_in_channel
                     else:
-                        is_public_thread = curr_msg.channel.type == discord.ChannelType.public_thread
-                        next_is_parent_msg = not curr_msg.reference and is_public_thread and curr_msg.channel.parent.type == discord.ChannelType.text
+                        is_public_thread = (
+                            curr_msg.channel.type == discord.ChannelType.public_thread
+                        )
+                        next_is_parent_msg = (
+                            not curr_msg.reference
+                            and is_public_thread
+                            and curr_msg.channel.parent.type == discord.ChannelType.text
+                        )
 
-                        next_msg_id = curr_msg.channel.id if next_is_parent_msg else getattr(curr_msg.reference, "message_id", None)
+                        next_msg_id = (
+                            curr_msg.channel.id
+                            if next_is_parent_msg
+                            else getattr(curr_msg.reference, "message_id", None)
+                        )
                         if next_msg_id:
                             if next_is_parent_msg:
                                 curr_node.next_msg = (
                                     curr_msg.channel.starter_message
-                                    or await curr_msg.channel.parent.fetch_message(next_msg_id)
+                                    or await curr_msg.channel.parent.fetch_message(
+                                        next_msg_id
+                                    )
                                 )
                             else:
                                 curr_node.next_msg = (
@@ -228,7 +280,9 @@ async def on_message(new_msg):
 
             if curr_node.images[:max_images]:
                 content = (
-                    ([dict(type="text", text=curr_node.text[:max_text])] if curr_node.text[:max_text] else [])
+                    ([dict(type="text", text=curr_node.text[:max_text])]
+                    if curr_node.text[:max_text]
+                    else [])
                     + curr_node.images[:max_images]
                 )
             else:
@@ -251,8 +305,12 @@ async def on_message(new_msg):
                 )
             if curr_node.has_bad_attachments:
                 user_warnings.add("⚠️ Unsupported attachments")
-            if curr_node.fetch_next_failed or (curr_node.next_msg is not None and len(messages) == max_messages):
-                user_warnings.add(f"⚠️ Only using last {len(messages)} message{'' if len(messages) == 1 else 's'}")
+            if curr_node.fetch_next_failed or (
+                curr_node.next_msg is not None and len(messages) == max_messages
+            ):
+                user_warnings.add(
+                    f"⚠️ Only using last {len(messages)} message{'' if len(messages) == 1 else 's'}"
+                )
 
             curr_msg = curr_node.next_msg
 
@@ -262,7 +320,6 @@ async def on_message(new_msg):
 
     if system_prompt := cfg["system_prompt"]:
         system_prompt_extras = [f"Today's date: {dt.now().strftime('%B %d, %Y')}."]
-
         if accept_usernames:
             system_prompt_extras.append(
                 "User's names are their Discord IDs and should be typed as '<@ID>'."
@@ -325,18 +382,26 @@ async def on_message(new_msg):
         extra_body=cfg["extra_api_parameters"],
     )
 
-    logging.info(f"Payload being sent to LLM API:\n{json.dumps(kwargs, indent=2, default=str)}")
+    logging.info(
+        f"Payload being sent to LLM API:\n{json.dumps(kwargs, indent=2, default=str)}"
+    )
 
     try:
         async with new_msg.channel.typing():
-            async for curr_chunk in await openai_client.chat.completions.create(**kwargs):
+            async for curr_chunk in await openai_client.chat.completions.create(
+                **kwargs
+            ):
                 prev_content = (
-                    prev_chunk.choices[0].delta.content if prev_chunk is not None and prev_chunk.choices[0].delta.content else ""
+                    prev_chunk.choices[0].delta.content
+                    if prev_chunk is not None and prev_chunk.choices[0].delta.content
+                    else ""
                 )
                 curr_content = curr_chunk.choices[0].delta.content or ""
 
                 if response_contents or prev_content:
-                    if response_contents == [] or len(response_contents[-1] + prev_content) > max_message_length:
+                    if response_contents == [] or len(
+                        response_contents[-1] + prev_content
+                    ) > max_message_length:
                         response_contents.append("")
 
                         if not searched_for_text_added and searched_for_text:
@@ -345,19 +410,33 @@ async def on_message(new_msg):
 
                         if not use_plain_responses:
                             embed = discord.Embed(
-                                description=(response_contents[-1] + prev_content + STREAMING_INDICATOR),
+                                description=(
+                                    response_contents[-1]
+                                    + prev_content
+                                    + STREAMING_INDICATOR
+                                ),
                                 color=EMBED_COLOR_INCOMPLETE,
                             )
                             for warning in sorted(user_warnings):
                                 embed.add_field(name=warning, value="", inline=False)
-                            footer_text = "Internet used" if msg_nodes[new_msg.id].internet_used else "Internet NOT used"
+                            footer_text = f"Model: {model} | " + (
+                                "Internet used"
+                                if msg_nodes[new_msg.id].internet_used
+                                else "Internet NOT used"
+                            )
                             embed.set_footer(text=footer_text)
 
-                            reply_to_msg = new_msg if response_msgs == [] else response_msgs[-1]
-                            response_msg = await reply_to_msg.reply(embed=embed, silent=True)
+                            reply_to_msg = (
+                                new_msg if response_msgs == [] else response_msgs[-1]
+                            )
+                            response_msg = await reply_to_msg.reply(
+                                embed=embed, silent=True
+                            )
                             msg_nodes[response_msg.id] = MsgNode(
                                 next_msg=new_msg,
-                                internet_used=msg_nodes[new_msg.id].internet_used
+                                internet_used=msg_nodes[
+                                    new_msg.id
+                                ].internet_used,
                             )
                             await msg_nodes[response_msg.id].lock.acquire()
                             response_msgs.append(response_msg)
@@ -370,9 +449,12 @@ async def on_message(new_msg):
 
                         ready_to_edit = (
                             (edit_task is None or edit_task.done())
-                            and dt.now().timestamp() - last_task_time >= EDIT_DELAY_SECONDS
+                            and dt.now().timestamp() - last_task_time
+                            >= EDIT_DELAY_SECONDS
                         )
-                        msg_split_incoming = len(response_contents[-1] + curr_content) > max_message_length
+                        msg_split_incoming = len(
+                            response_contents[-1] + curr_content
+                        ) > max_message_length
                         is_final_edit = finish_reason is not None or msg_split_incoming
                         is_good_finish = finish_reason is not None and any(
                             finish_reason.lower() == x for x in ("stop", "end_turn")
@@ -388,12 +470,20 @@ async def on_message(new_msg):
                                 else (response_contents[-1] + STREAMING_INDICATOR)
                             )
                             embed.color = (
-                                EMBED_COLOR_COMPLETE if msg_split_incoming or is_good_finish else EMBED_COLOR_INCOMPLETE
+                                EMBED_COLOR_COMPLETE
+                                if msg_split_incoming or is_good_finish
+                                else EMBED_COLOR_INCOMPLETE
                             )
-                            footer_text = "Internet used" if msg_nodes[new_msg.id].internet_used else "Internet NOT used"
+                            footer_text = f"Model: {model} | " + (
+                                "Internet used"
+                                if msg_nodes[new_msg.id].internet_used
+                                else "Internet NOT used"
+                            )
                             embed.set_footer(text=footer_text)
 
-                            edit_task = asyncio.create_task(response_msgs[-1].edit(embed=embed))
+                            edit_task = asyncio.create_task(
+                                response_msgs[-1].edit(embed=embed)
+                            )
                             last_task_time = dt.now().timestamp()
 
                 prev_chunk = curr_chunk
@@ -401,7 +491,9 @@ async def on_message(new_msg):
         if use_plain_responses:
             for content in response_contents:
                 reply_to_msg = new_msg if response_msgs == [] else response_msgs[-1]
-                response_msg = await reply_to_msg.reply(content=content, suppress_embeds=True)
+                response_msg = await reply_to_msg.reply(
+                    content=content, suppress_embeds=True
+                )
                 msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
                 await msg_nodes[response_msg.id].lock.acquire()
                 response_msgs.append(response_msg)
