@@ -21,6 +21,8 @@ from discord.ui import View, Button
 from discord import File
 import io
 
+from api_key_manager import APIKeyManager
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
@@ -52,8 +54,8 @@ def get_config(filename="config.yaml"):
     with open(filename, "r") as file:
         return yaml.safe_load(file)
 
-
 cfg = get_config()
+api_key_manager = APIKeyManager(cfg)
 
 if client_id := cfg["client_id"]:
     logging.info(
@@ -154,7 +156,10 @@ async def on_message(new_msg):
 
     provider, model = cfg["model"].split("/", 1)
     base_url = cfg["providers"][provider]["base_url"]
-    api_key = cfg["providers"][provider].get("api_key", "sk-no-key-required")
+    api_key = await api_key_manager.get_next_api_key(provider)
+    if not api_key:
+        api_key = 'sk-no-key-required'
+
     openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
 
     accept_images = any(x in model.lower() for x in VISION_MODEL_TAGS)
@@ -321,7 +326,7 @@ async def on_message(new_msg):
             curr_msg = curr_node.next_msg
 
     messages = messages[::-1] 
-    
+
     logging.info(
         f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}"
     )
@@ -350,18 +355,18 @@ async def on_message(new_msg):
         image_attachment = new_msg.attachments[0]
         image_url = image_attachment.url
 
-        serpapi_api_key = cfg.get('serpapi_api_key')
+        serpapi_api_key = await api_key_manager.get_next_api_key('serpapi')
         if not serpapi_api_key:
-            await new_msg.channel.send('SerpApi API key not set in config.')
+            await new_msg.channel.send('No SerpApi API key available.')
             return
 
         try:
-            lens_results = await get_google_lens_results(image_url, serpapi_api_key)
+            lens_results = await get_google_lens_results(image_url, api_key_manager)
         except Exception as e:
             await new_msg.channel.send(f"Error calling Google Lens API: {e}")
             return
 
-        formatted_lens_results = await process_google_lens_results(lens_results, cfg)
+        formatted_lens_results = await process_google_lens_results(lens_results, cfg, api_key_manager)
 
         augmented_user_message = user_message_content + "\n\nRespond to my query based on the google lens results:\n" + formatted_lens_results
 
@@ -377,7 +382,7 @@ async def on_message(new_msg):
         is_url_query = False
         augmented_user_message = None
         if urls_in_message:
-            contents = await fetch_urls_content(urls_in_message, config=cfg)
+            contents = await fetch_urls_content(urls_in_message, api_key_manager, config=cfg)
             augmented_user_message = (
                 new_msg.content + "\n\nRespond to my query based on the url content/s:\n"
             )
@@ -388,19 +393,19 @@ async def on_message(new_msg):
             is_url_query = True
 
         if not is_url_query:
-            latest_user_query = await rephrase_query(messages, cfg)
+            latest_user_query = await rephrase_query(messages, cfg, api_key_manager)
             if latest_user_query != 'not_needed':
-                split_queries = await split_query(latest_user_query, cfg)
-                serper_api_key = cfg.get('serper_api_key')
+                split_queries = await split_query(latest_user_query, cfg, api_key_manager)
+                serper_api_key = await api_key_manager.get_next_api_key('serper')
                 if not serper_api_key:
-                    await new_msg.channel.send('Serper API key not set in config.')
+                    await new_msg.channel.send('No Serper API key available.')
                     return
 
                 msg_nodes[new_msg.id].serper_queries = split_queries
                 msg_nodes[new_msg.id].internet_used = True
 
                 search_results_list = await asyncio.gather(
-                    *[handle_search_query(q, serper_api_key, config=cfg) for q in split_queries]
+                    *[handle_search_query(q, api_key_manager, config=cfg) for q in split_queries]
                 )
 
                 search_results = ""

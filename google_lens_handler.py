@@ -2,16 +2,23 @@ import asyncio
 import httpx
 import html2text
 
+from youtube_handler import fetch_youtube_content
+from reddit_handler import fetch_reddit_content
+
 def is_youtube_url(url):
     return 'youtube.com' in url or 'youtu.be' in url
 
 def is_reddit_url(url):
     return 'reddit.com' in url or 'redd.it' in url
 
-async def get_google_lens_results(image_url, api_key, hl='en', country='us'):
+async def get_google_lens_results(image_url, api_key_manager, hl='en', country='us'):
     """
     Calls the SerpApi Google Lens API with the provided image URL.
     """
+    api_key = await api_key_manager.get_next_api_key('serpapi')
+    if not api_key:
+        raise Exception("No SerpApi API key available.")
+
     params = {
         'engine': 'google_lens',
         'url': image_url,
@@ -26,7 +33,7 @@ async def get_google_lens_results(image_url, api_key, hl='en', country='us'):
         data = response.json()
         return data
 
-async def process_google_lens_results(results, config):
+async def process_google_lens_results(results, config, api_key_manager):
     """
     Processes the visual matches from the Google Lens API response.
     Fetches content for each URL and formats the results.
@@ -38,7 +45,7 @@ async def process_google_lens_results(results, config):
     for idx, match in enumerate(visual_matches[:10], start=1):
         url = match.get('link', '')
         title = match.get('title', '')
-        tasks.append(process_visual_match(idx, url, title, config))
+        tasks.append(process_visual_match(idx, url, title, config, api_key_manager))
 
     processed_matches = await asyncio.gather(*tasks)
 
@@ -47,28 +54,16 @@ async def process_google_lens_results(results, config):
 
     return formatted_results
 
-async def process_visual_match(idx, url, title, config):
+async def process_visual_match(idx, url, title, config, api_key_manager):
     """
     Processes a single visual match by fetching its content and formatting the result.
     """
     content = ''
 
     if is_youtube_url(url):
-        api_key = config.get('youtube_api_key', '')
-        if not api_key:
-            content = "YouTube API key not set in config."
-        else:
-            from youtube_handler import fetch_youtube_content
-            content = await fetch_youtube_content(url, api_key)
+        content = await fetch_youtube_content(url, api_key_manager)
     elif is_reddit_url(url):
-        client_id = config.get('reddit_client_id', '')
-        client_secret = config.get('reddit_client_secret', '')
-        user_agent = config.get('reddit_user_agent', 'llmcord_bot')
-        if not client_id or not client_secret:
-            content = "Reddit API credentials not set in config."
-        else:
-            from reddit_handler import fetch_reddit_content
-            content = await fetch_reddit_content(url, client_id, client_secret, user_agent)
+        content = await fetch_reddit_content(url, api_key_manager)
     else:
         try:
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:

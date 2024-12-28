@@ -1,7 +1,6 @@
 import re
 import asyncpraw
 
-
 def extract_submission_id(url):
     patterns = [
         r'reddit\.com/r/[^/]+/comments/([^/]+)/',
@@ -13,12 +12,15 @@ def extract_submission_id(url):
             return match.group(1)
     return None
 
+async def fetch_reddit_content(url, api_key_manager):
+    credentials = await api_key_manager.get_next_api_key('reddit')
+    if not credentials:
+        return "No Reddit credentials available."
 
-async def fetch_reddit_content(url, client_id, client_secret, user_agent):
     reddit = asyncpraw.Reddit(
-        client_id=client_id,
-        client_secret=client_secret,
-        user_agent=user_agent
+        client_id=credentials['client_id'],
+        client_secret=credentials['client_secret'],
+        user_agent=credentials['user_agent']
     )
 
     submission_id = extract_submission_id(url)

@@ -2,9 +2,14 @@ import asyncio
 from url_handler import fetch_urls_content
 import httpx
 
-async def handle_search_query(query, api_key, max_urls=2, config=None):
+async def handle_search_query(query, api_key_manager, max_urls=2, config=None):
     if config is None:
         config = {}
+
+    api_key = await api_key_manager.get_next_api_key('serper')
+    if not api_key:
+        return "No Serper API key available."
+
     headers = {
         'Content-Type': 'application/json',
         'X-API-KEY': api_key
@@ -29,7 +34,7 @@ async def handle_search_query(query, api_key, max_urls=2, config=None):
             if len(urls) >= max_urls:
                 break
 
-    contents = await fetch_urls_content(urls, config=config)
+    contents = await fetch_urls_content(urls, api_key_manager, config=config)
 
     results = []
     for idx, (url, content) in enumerate(zip(urls, contents), start=1):

@@ -3,7 +3,7 @@ import json
 
 from openai import AsyncOpenAI
 
-async def split_query(query, cfg):
+async def split_query(query, cfg, api_key_manager):
     query_splitter_prompt = '''Your task is to determine if the query implies a comparison between multiple entities.
 
 If it does, decompose it into separate queries focusing on each entity, along with the original comparison query.
@@ -37,7 +37,10 @@ Query: {query}'''
     query_splitter_model = cfg.get('query_splitter_model', 'openai/gpt-3.5-turbo')
     provider, model = query_splitter_model.split('/', 1)
     base_url = cfg["providers"][provider]["base_url"]
-    api_key = cfg["providers"][provider].get("api_key", "sk-no-key-required")
+
+    api_key = await api_key_manager.get_next_api_key(provider)
+    if not api_key:
+        api_key = 'sk-no-key-required'
 
     messages = [
         {"role": "system", "content": "You are a helpful assistant."},

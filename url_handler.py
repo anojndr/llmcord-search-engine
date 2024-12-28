@@ -10,24 +10,16 @@ def extract_urls_from_text(text):
     urls = re.findall(url_pattern, text)
     return urls
 
-async def fetch_urls_content(urls, config=None):
+async def fetch_urls_content(urls, api_key_manager, config=None):
     if config is None:
         config = {}
 
     async def fetch_and_convert(url):
         if 'youtube.com' in url or 'youtu.be' in url:
-            api_key = config.get('youtube_api_key', '')
-            if not api_key:
-                return "YouTube API key not set in config."
-            content = await fetch_youtube_content(url, api_key)
+            content = await fetch_youtube_content(url, api_key_manager)
             return content
         elif 'reddit.com' in url or 'redd.it' in url:
-            client_id = config.get('reddit_client_id', '')
-            client_secret = config.get('reddit_client_secret', '')
-            user_agent = config.get('reddit_user_agent', 'llmcord_bot')
-            if not client_id or not client_secret:
-                return "Reddit API credentials not set in config."
-            content = await fetch_reddit_content(url, client_id, client_secret, user_agent)
+            content = await fetch_reddit_content(url, api_key_manager)
             return content
         else:
             try:

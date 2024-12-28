@@ -4,7 +4,7 @@ import re
 
 from openai import AsyncOpenAI
 
-async def rephrase_query(messages, cfg):
+async def rephrase_query(messages, cfg, api_key_manager):
     rephraser_messages = [dict(m) for m in messages]
 
     rephraser_instruction = cfg.get('rephraser_instruction')
@@ -90,7 +90,10 @@ Latest user query:'''
     rephraser_model = cfg.get('rephraser_model', 'openai/gpt-4o')
     provider, model = rephraser_model.split('/', 1)
     base_url = cfg['providers'][provider]['base_url']
-    api_key = cfg['providers'][provider].get('api_key', 'sk-no-key-required')
+
+    api_key = await api_key_manager.get_next_api_key(provider)
+    if not api_key:
+        api_key = 'sk-no-key-required'
 
     for i in range(len(rephraser_messages) - 1, -1, -1):
         if rephraser_messages[i]['role'] == 'user':

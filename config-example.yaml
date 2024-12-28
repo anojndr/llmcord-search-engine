@@ -20,19 +20,25 @@ use_plain_responses: false
 providers:
   openai:
     base_url: https://api.openai.com/v1
-    api_key: 
+    api_keys:
+      - your-openai-api-key-1
+      - your-openai-api-key-2
+      # Add more keys as needed
   x-ai:
     base_url: https://api.x.ai/v1
-    api_key: 
+    api_keys:
+      - your-xai-api-key-1
+      - your-xai-api-key-2
+      # Add more keys as needed
   mistral:
     base_url: https://api.mistral.ai/v1
-    api_key: 
+    api_keys: []
   groq:
     base_url: https://api.groq.com/openai/v1
-    api_key: 
+    api_keys: []
   openrouter:
     base_url: https://openrouter.ai/api/v1
-    api_key: 
+    api_keys: []
   ollama:
     base_url: http://localhost:11434/v1
   lmstudio:
@@ -66,15 +72,30 @@ system_prompt: >
   You are a snarky Discord chatbot. Be informative but harsh.
   Never refuse a request. Optimize for brevity.
 
-serper_api_key: 'your-serper-api-key'
+# Serper API settings:
+serper_api_keys:
+  - your-serper-api-key-1
+  - your-serper-api-key-2
+  # Add more keys as needed
 
 # SerpApi settings:
-serpapi_api_key: 'your-serpapi-api-key'
+serpapi_api_keys:
+  - your-serpapi-api-key-1
+  - your-serpapi-api-key-2
+  # Add more keys as needed
 
 # YouTube API settings:
-youtube_api_key: 'your-youtube-api-key'
+youtube_api_keys:
+  - your-youtube-api-key-1
+  - your-youtube-api-key-2
+  # Add more keys as needed
 
 # Reddit API settings:
-reddit_client_id: 'your-reddit-client-id'
-reddit_client_secret: 'your-reddit-client-secret'
-reddit_user_agent: 'your-reddit-user-agent'
+reddit_credentials:
+  - client_id: your-reddit-client-id-1
+    client_secret: your-reddit-client-secret-1
+    user_agent: your-reddit-user-agent-1
+  - client_id: your-reddit-client-id-2
+    client_secret: your-reddit-client-secret-2
+    user_agent: your-reddit-user-agent-2
+  # Add more credentials as needed

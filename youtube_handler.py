@@ -2,7 +2,6 @@ import re
 from googleapiclient.discovery import build
 from youtube_transcript_api import YouTubeTranscriptApi
 
-
 def extract_video_id(url):
     patterns = [
         r'youtu\.be/([^/?&]+)',
@@ -17,11 +16,14 @@ def extract_video_id(url):
             return match.group(1)
     return None
 
-
-async def fetch_youtube_content(url, api_key, max_comments=50):
+async def fetch_youtube_content(url, api_key_manager, max_comments=50):
     video_id = extract_video_id(url)
     if not video_id:
         return "Could not extract video ID from URL."
+
+    api_key = await api_key_manager.get_next_api_key('youtube')
+    if not api_key:
+        return "No YouTube API key available."
 
     try:
         youtube = build('youtube', 'v3', developerKey=api_key)
