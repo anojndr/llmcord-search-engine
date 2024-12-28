@@ -77,6 +77,8 @@ class MsgNode:
 
     serper_queries: Optional[list] = None
 
+    internet_used: bool = False
+
 
 @discord_client.event
 async def on_message(new_msg):
@@ -271,6 +273,8 @@ async def on_message(new_msg):
 
     messages = messages[::-1]
 
+    msg_nodes[new_msg.id].internet_used = False
+
     if not is_url_query:
         latest_user_query = await rephrase_query(messages, cfg)
         if latest_user_query != 'not_needed':
@@ -281,6 +285,7 @@ async def on_message(new_msg):
                 return
 
             msg_nodes[new_msg.id].serper_queries = split_queries
+            msg_nodes[new_msg.id].internet_used = True
 
             search_results_list = await asyncio.gather(
                 *[handle_search_query(q, serper_api_key, config=cfg) for q in split_queries]
@@ -296,8 +301,10 @@ async def on_message(new_msg):
                     message['content'] = augmented_user_message
                     msg_nodes[new_msg.id].text = augmented_user_message
                     break
+    else:
+        msg_nodes[new_msg.id].internet_used = True
 
-    # Generate and send response message(s) (can be multiple if response is long)
+    # Generate and send response message(s)
     response_msgs = []
     response_contents = []
     prev_chunk = None
@@ -343,10 +350,15 @@ async def on_message(new_msg):
                             )
                             for warning in sorted(user_warnings):
                                 embed.add_field(name=warning, value="", inline=False)
+                            footer_text = "Internet used" if msg_nodes[new_msg.id].internet_used else "Internet NOT used"
+                            embed.set_footer(text=footer_text)
 
                             reply_to_msg = new_msg if response_msgs == [] else response_msgs[-1]
                             response_msg = await reply_to_msg.reply(embed=embed, silent=True)
-                            msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
+                            msg_nodes[response_msg.id] = MsgNode(
+                                next_msg=new_msg,
+                                internet_used=msg_nodes[new_msg.id].internet_used
+                            )
                             await msg_nodes[response_msg.id].lock.acquire()
                             response_msgs.append(response_msg)
                             last_task_time = dt.now().timestamp()
@@ -378,6 +390,9 @@ async def on_message(new_msg):
                             embed.color = (
                                 EMBED_COLOR_COMPLETE if msg_split_incoming or is_good_finish else EMBED_COLOR_INCOMPLETE
                             )
+                            footer_text = "Internet used" if msg_nodes[new_msg.id].internet_used else "Internet NOT used"
+                            embed.set_footer(text=footer_text)
+
                             edit_task = asyncio.create_task(response_msgs[-1].edit(embed=embed))
                             last_task_time = dt.now().timestamp()
 
@@ -397,7 +412,7 @@ async def on_message(new_msg):
         msg_nodes[response_msg.id].text = "".join(response_contents)
         msg_nodes[response_msg.id].lock.release()
 
-    # Delete oldest MsgNodes (lowest message IDs) from the cache
+    # Delete oldest MsgNodes from the cache
     if (num_nodes := len(msg_nodes)) > MAX_MESSAGE_NODES:
         for msg_id in sorted(msg_nodes.keys())[: num_nodes - MAX_MESSAGE_NODES]:
             async with msg_nodes.setdefault(msg_id, MsgNode()).lock:
