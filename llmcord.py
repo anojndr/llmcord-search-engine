@@ -15,6 +15,7 @@ from search_handler import handle_search_query
 from url_handler import extract_urls_from_text, fetch_urls_content
 from rephraser_handler import rephrase_query
 from query_splitter_handler import split_query
+from google_lens_handler import get_google_lens_results, process_google_lens_results
 
 from discord.ui import View, Button
 from discord import File
@@ -168,21 +169,7 @@ async def on_message(new_msg):
         2000 if use_plain_responses else (4096 - len(STREAMING_INDICATOR))
     )
 
-    urls_in_message = extract_urls_from_text(new_msg.content)
-    is_url_query = False
-    augmented_user_message = None
-    if urls_in_message:
-        contents = await fetch_urls_content(urls_in_message, config=cfg)
-        augmented_user_message = (
-            new_msg.content + "\n\nRespond to my query based on the url content/s:\n"
-        )
-        for idx, (url, content) in enumerate(zip(urls_in_message, contents), start=1):
-            augmented_user_message += (
-                f"url {idx}:\n{url}\nurl {idx} content:\n{content}\n\n"
-            )
-        is_url_query = True
-
-    # Build message chain and set user warnings
+    # Initialize messages list
     messages = []
     user_warnings = set()
     curr_msg = new_msg
@@ -212,9 +199,6 @@ async def on_message(new_msg):
                     curr_node.text = curr_node.text.replace(
                         discord_client.user.mention, "", 1
                     ).lstrip()
-
-                if (curr_msg.id == new_msg.id) and is_url_query:
-                    curr_node.text = augmented_user_message
 
                 curr_node.images = [
                     dict(
@@ -336,6 +320,8 @@ async def on_message(new_msg):
 
             curr_msg = curr_node.next_msg
 
+    messages = messages[::-1] 
+    
     logging.info(
         f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}"
     )
@@ -348,40 +334,87 @@ async def on_message(new_msg):
             )
 
         full_system_prompt = "\n".join([system_prompt] + system_prompt_extras)
-        messages.append(dict(role="system", content=full_system_prompt))
-
-    messages = messages[::-1]
+        messages.insert(0, dict(role="system", content=full_system_prompt))
 
     msg_nodes[new_msg.id].internet_used = False
 
-    if not is_url_query:
-        latest_user_query = await rephrase_query(messages, cfg)
-        if latest_user_query != 'not_needed':
-            split_queries = await split_query(latest_user_query, cfg)
-            serper_api_key = cfg.get('serper_api_key')
-            if not serper_api_key:
-                await new_msg.channel.send('Serper API key not set in config.')
-                return
+    user_message_content = new_msg.content
 
-            msg_nodes[new_msg.id].serper_queries = split_queries
-            msg_nodes[new_msg.id].internet_used = True
+    if user_message_content.lower().startswith('lens'):
+        user_message_content = user_message_content[len('lens'):].lstrip()
 
-            search_results_list = await asyncio.gather(
-                *[handle_search_query(q, serper_api_key, config=cfg) for q in split_queries]
-            )
+        if len(new_msg.attachments) == 0:
+            await new_msg.channel.send("Please attach an image for the Google Lens search.")
+            return
 
-            search_results = ""
-            for idx, (query, result) in enumerate(zip(split_queries, search_results_list), start=1):
-                search_results += f"Results for query {idx} ('{query}'):\n{result}\n\n"
+        image_attachment = new_msg.attachments[0]
+        image_url = image_attachment.url
 
-            augmented_user_message = new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
-            for message in messages:
-                if message['role'] == 'user':
-                    message['content'] = augmented_user_message
-                    msg_nodes[new_msg.id].text = augmented_user_message
-                    break
-    else:
+        serpapi_api_key = cfg.get('serpapi_api_key')
+        if not serpapi_api_key:
+            await new_msg.channel.send('SerpApi API key not set in config.')
+            return
+
+        try:
+            lens_results = await get_google_lens_results(image_url, serpapi_api_key)
+        except Exception as e:
+            await new_msg.channel.send(f"Error calling Google Lens API: {e}")
+            return
+
+        formatted_lens_results = await process_google_lens_results(lens_results, cfg)
+
+        augmented_user_message = user_message_content + "\n\nRespond to my query based on the google lens results:\n" + formatted_lens_results
+
+        for message in messages:
+            if message['role'] == 'user':
+                message['content'] = augmented_user_message
+                msg_nodes[new_msg.id].text = augmented_user_message
+                break
+
         msg_nodes[new_msg.id].internet_used = True
+    else:
+        urls_in_message = extract_urls_from_text(new_msg.content)
+        is_url_query = False
+        augmented_user_message = None
+        if urls_in_message:
+            contents = await fetch_urls_content(urls_in_message, config=cfg)
+            augmented_user_message = (
+                new_msg.content + "\n\nRespond to my query based on the url content/s:\n"
+            )
+            for idx, (url, content) in enumerate(zip(urls_in_message, contents), start=1):
+                augmented_user_message += (
+                    f"url {idx}:\n{url}\nurl {idx} content:\n{content}\n\n"
+                )
+            is_url_query = True
+
+        if not is_url_query:
+            latest_user_query = await rephrase_query(messages, cfg)
+            if latest_user_query != 'not_needed':
+                split_queries = await split_query(latest_user_query, cfg)
+                serper_api_key = cfg.get('serper_api_key')
+                if not serper_api_key:
+                    await new_msg.channel.send('Serper API key not set in config.')
+                    return
+
+                msg_nodes[new_msg.id].serper_queries = split_queries
+                msg_nodes[new_msg.id].internet_used = True
+
+                search_results_list = await asyncio.gather(
+                    *[handle_search_query(q, serper_api_key, config=cfg) for q in split_queries]
+                )
+
+                search_results = ""
+                for idx, (query, result) in enumerate(zip(split_queries, search_results_list), start=1):
+                    search_results += f"Results for query {idx} ('{query}'):\n{result}\n\n"
+
+                augmented_user_message = new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
+                for message in messages:
+                    if message['role'] == 'user':
+                        message['content'] = augmented_user_message
+                        msg_nodes[new_msg.id].text = augmented_user_message
+                        break
+        else:
+            msg_nodes[new_msg.id].internet_used = True
 
     # Generate and send response message(s)
     response_msgs = []

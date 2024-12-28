@@ -68,6 +68,9 @@ system_prompt: >
 
 serper_api_key: 'your-serper-api-key'
 
+# SerpApi settings:
+serpapi_api_key: 'your-serpapi-api-key'
+
 # YouTube API settings:
 youtube_api_key: 'your-youtube-api-key'
 
