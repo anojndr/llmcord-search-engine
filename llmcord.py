@@ -1,4 +1,5 @@
 import asyncio
+import re
 from base64 import b64encode
 from dataclasses import dataclass, field
 from datetime import datetime as dt
@@ -53,6 +54,7 @@ MAX_MESSAGE_NODES = 100
 def get_config(filename="config.yaml"):
     with open(filename, "r") as file:
         return yaml.safe_load(file)
+
 
 cfg = get_config()
 api_key_manager = APIKeyManager(cfg)
@@ -119,8 +121,18 @@ async def on_message(new_msg):
 
     is_dm = new_msg.channel.type == discord.ChannelType.private
 
-    if (not is_dm and discord_client.user not in new_msg.mentions) or new_msg.author.bot:
+    at_ai_pattern = r'\bat ai\b'
+
+    if (
+        not is_dm and
+        not re.search(at_ai_pattern, new_msg.content.lower()) and
+        discord_client.user not in new_msg.mentions
+    ) or new_msg.author.bot:
         return
+
+    content_without_at_ai = re.sub(at_ai_pattern, '', new_msg.content, flags=re.IGNORECASE)
+    content_without_mentions = content_without_at_ai.replace(discord_client.user.mention, '').lstrip()
+    new_msg.content = content_without_mentions
 
     cfg = get_config()
 
@@ -212,7 +224,7 @@ async def on_message(new_msg):
                             url=f"data:{att.content_type};base64,{b64encode((await httpx_client.get(att.url)).content).decode('utf-8')}"
                         ),
                     )
-                    for att in good_attachments["image"]
+                for att in good_attachments["image"]
                 ]
 
                 curr_node.role = (
@@ -325,7 +337,7 @@ async def on_message(new_msg):
 
             curr_msg = curr_node.next_msg
 
-    messages = messages[::-1] 
+    messages = messages[::-1]
 
     logging.info(
         f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}"
