@@ -16,6 +16,10 @@ from url_handler import extract_urls_from_text, fetch_urls_content
 from rephraser_handler import rephrase_query
 from query_splitter_handler import split_query
 
+from discord.ui import View, Button
+from discord import File
+import io
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
@@ -57,7 +61,7 @@ if client_id := cfg["client_id"]:
 
 intents = discord.Intents.default()
 intents.message_content = True
-activity = discord.CustomActivity(
+activity = discord.Game(
     name=(cfg["status_message"] or "github.com/jakobdylanc/llmcord")[:128]
 )
 discord_client = discord.Client(intents=intents, activity=activity)
@@ -66,6 +70,24 @@ httpx_client = httpx.AsyncClient()
 
 msg_nodes = {}
 last_task_time = None
+
+
+class OutputView(View):
+    def __init__(self, contents):
+        super().__init__()
+        self.contents = contents
+
+    @discord.ui.button(label="Get Output as Text File", style=discord.ButtonStyle.primary)
+    async def send_text_file(self, interaction: discord.Interaction, button: discord.ui.Button):
+        full_content = "".join(self.contents)
+        file = io.StringIO(full_content)
+        await interaction.response.send_message(
+            content="Here is the output as a text file:",
+            file=File(file, filename="output.txt"),
+            ephemeral=True
+        )
+        button.disabled = True
+        await interaction.message.edit(view=self)
 
 
 @dataclass
@@ -426,11 +448,13 @@ async def on_message(new_msg):
                             )
                             embed.set_footer(text=footer_text)
 
+                            view = OutputView(response_contents)
+
                             reply_to_msg = (
                                 new_msg if response_msgs == [] else response_msgs[-1]
                             )
                             response_msg = await reply_to_msg.reply(
-                                embed=embed, silent=True
+                                embed=embed, view=view, silent=True
                             )
                             msg_nodes[response_msg.id] = MsgNode(
                                 next_msg=new_msg,
@@ -482,17 +506,19 @@ async def on_message(new_msg):
                             embed.set_footer(text=footer_text)
 
                             edit_task = asyncio.create_task(
-                                response_msgs[-1].edit(embed=embed)
+                                response_msgs[-1].edit(embed=embed, view=view)
                             )
                             last_task_time = dt.now().timestamp()
 
                 prev_chunk = curr_chunk
 
         if use_plain_responses:
+            view = OutputView(response_contents)
+
             for content in response_contents:
                 reply_to_msg = new_msg if response_msgs == [] else response_msgs[-1]
                 response_msg = await reply_to_msg.reply(
-                    content=content, suppress_embeds=True
+                    content=content, view=view, suppress_embeds=True
                 )
                 msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
                 await msg_nodes[response_msg.id].lock.acquire()
