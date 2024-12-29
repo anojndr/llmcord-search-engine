@@ -28,7 +28,9 @@ async def fetch_urls_content(urls, api_key_manager, config=None):
                     response.raise_for_status()
                     if 'text/html' in response.headers.get('Content-Type', ''):
                         html_content = response.text
-                        text_content = html2text.html2text(html_content)
+                        text_maker = html2text.HTML2Text()
+                        text_maker.ignore_images = True
+                        text_content = text_maker.handle(html_content)
                     else:
                         text_content = response.text
                     return text_content.strip()

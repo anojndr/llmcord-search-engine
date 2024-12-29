@@ -73,7 +73,6 @@ async def process_visual_match(idx, url, title, config, api_key_manager):
                     html_content = response.text
                     text_maker = html2text.HTML2Text()
                     text_maker.ignore_images = True
-                    text_maker.ignore_links = True
                     text_content = text_maker.handle(html_content)
                 else:
                     text_content = response.text
