@@ -67,7 +67,7 @@ if client_id := cfg["client_id"]:
 intents = discord.Intents.default()
 intents.message_content = True
 activity = discord.Game(
-    name=(cfg["status_message"] or "github.com/jakobdylanc/llmcord")[:128]
+    name=(cfg["status_message"] or "https://github.com/anojndr/llmcord")[:128]
 )
 discord_client = discord.Client(intents=intents, activity=activity)
 
@@ -166,300 +166,302 @@ async def on_message(new_msg):
     if is_bad_channel or is_bad_user:
         return
 
-    provider, model = cfg["model"].split("/", 1)
-    base_url = cfg["providers"][provider]["base_url"]
-    api_key = await api_key_manager.get_next_api_key(provider)
-    if not api_key:
-        api_key = 'sk-no-key-required'
-
-    openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
-
-    accept_images = any(x in model.lower() for x in VISION_MODEL_TAGS)
-    accept_usernames = any(x in provider.lower() for x in PROVIDERS_SUPPORTING_USERNAMES)
-
-    max_text = cfg["max_text"]
-    max_images = cfg["max_images"] if accept_images else 0
-    max_messages = cfg["max_messages"]
-
-    use_plain_responses = cfg["use_plain_responses"]
-    max_message_length = (
-        2000 if use_plain_responses else (4096 - len(STREAMING_INDICATOR))
-    )
-
-    # Initialize messages list
-    messages = []
-    user_warnings = set()
-    curr_msg = new_msg
-    while curr_msg != None and len(messages) < max_messages:
-        curr_node = msg_nodes.setdefault(curr_msg.id, MsgNode())
-
-        async with curr_node.lock:
-            if curr_node.text is None:
-                good_attachments = {
-                    type: [
-                        att
-                        for att in curr_msg.attachments
-                        if att.content_type and type in att.content_type
-                    ]
-                    for type in ALLOWED_FILE_TYPES
-                }
-
-                curr_node.text = "\n".join(
-                    ([curr_msg.content] if curr_msg.content else [])
-                    + [embed.description for embed in curr_msg.embeds if embed.description]
-                    + [
-                        (await httpx_client.get(att.url)).text
-                        for att in good_attachments["text"]
-                    ]
-                )
-                if curr_node.text.startswith(discord_client.user.mention):
-                    curr_node.text = curr_node.text.replace(
-                        discord_client.user.mention, "", 1
-                    ).lstrip()
-
-                curr_node.images = [
-                    dict(
-                        type="image_url",
-                        image_url=dict(
-                            url=f"data:{att.content_type};base64,{b64encode((await httpx_client.get(att.url)).content).decode('utf-8')}"
-                        ),
-                    )
-                for att in good_attachments["image"]
-                ]
-
-                curr_node.role = (
-                    "assistant" if curr_msg.author == discord_client.user else "user"
-                )
-
-                curr_node.user_id = (
-                    curr_msg.author.id if curr_node.role == "user" else None
-                )
-
-                curr_node.has_bad_attachments = len(curr_msg.attachments) > sum(
-                    len(att_list) for att_list in good_attachments.values()
-                )
-
-                try:
-                    if (
-                        not curr_msg.reference
-                        and discord_client.user.mention not in curr_msg.content
-                        and (
-                            prev_msg_in_channel := (
-                                [
-                                    m
-                                    async for m in curr_msg.channel.history(
-                                        before=curr_msg, limit=1
-                                    )
-                                ]
-                                or [None]
-                            )[0]
-                        )
-                        and any(
-                            prev_msg_in_channel.type == type
-                            for type in (
-                                discord.MessageType.default,
-                                discord.MessageType.reply,
-                            )
-                        )
-                        and prev_msg_in_channel.author
-                        == (
-                            discord_client.user
-                            if curr_msg.channel.type == discord.ChannelType.private
-                            else curr_msg.author
-                        )
-                    ):
-                        curr_node.next_msg = prev_msg_in_channel
-                    else:
-                        is_public_thread = (
-                            curr_msg.channel.type == discord.ChannelType.public_thread
-                        )
-                        next_is_parent_msg = (
-                            not curr_msg.reference
-                            and is_public_thread
-                            and curr_msg.channel.parent.type == discord.ChannelType.text
-                        )
-
-                        next_msg_id = (
-                            curr_msg.channel.id
-                            if next_is_parent_msg
-                            else getattr(curr_msg.reference, "message_id", None)
-                        )
-                        if next_msg_id:
-                            if next_is_parent_msg:
-                                curr_node.next_msg = (
-                                    curr_msg.channel.starter_message
-                                    or await curr_msg.channel.parent.fetch_message(
-                                        next_msg_id
-                                    )
-                                )
-                            else:
-                                curr_node.next_msg = (
-                                    curr_msg.reference.cached_message
-                                    or await curr_msg.channel.fetch_message(next_msg_id)
-                                )
-                except (discord.NotFound, discord.HTTPException, AttributeError):
-                    logging.exception("Error fetching next message in the chain")
-                    curr_node.fetch_next_failed = True
-
-            if curr_node.images[:max_images]:
-                content = (
-                    ([dict(type="text", text=curr_node.text[:max_text])]
-                    if curr_node.text[:max_text]
-                    else [])
-                    + curr_node.images[:max_images]
-                )
-            else:
-                content = curr_node.text[:max_text]
-
-            if content != "":
-                message = dict(content=content, role=curr_node.role)
-                if accept_usernames and curr_node.user_id is not None:
-                    message["name"] = str(curr_node.user_id)
-
-                messages.append(message)
-
-            if len(curr_node.text) > max_text:
-                user_warnings.add(f"⚠️ Max {max_text:,} characters per message")
-            if len(curr_node.images) > max_images:
-                user_warnings.add(
-                    f"⚠️ Max {max_images} image{'' if max_images == 1 else 's'} per message"
-                    if max_images > 0
-                    else "⚠️ Can't see images"
-                )
-            if curr_node.has_bad_attachments:
-                user_warnings.add("⚠️ Unsupported attachments")
-            if curr_node.fetch_next_failed or (
-                curr_node.next_msg is not None and len(messages) == max_messages
-            ):
-                user_warnings.add(
-                    f"⚠️ Only using last {len(messages)} message{'' if len(messages) == 1 else 's'}"
-                )
-
-            curr_msg = curr_node.next_msg
-
-    messages = messages[::-1]
-
-    logging.info(
-        f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}"
-    )
-
-    if system_prompt := cfg["system_prompt"]:
-        system_prompt_extras = [f"Today's date: {dt.now().strftime('%B %d, %Y')}."]
-        if accept_usernames:
-            system_prompt_extras.append(
-                "User's names are their Discord IDs and should be typed as '<@ID>'."
-            )
-
-        full_system_prompt = "\n".join([system_prompt] + system_prompt_extras)
-        messages.insert(0, dict(role="system", content=full_system_prompt))
-
-    msg_nodes[new_msg.id].internet_used = False
-
-    user_message_content = new_msg.content
-
-    if user_message_content.lower().startswith('lens'):
-        user_message_content = user_message_content[len('lens'):].lstrip()
-
-        if len(new_msg.attachments) == 0:
-            await new_msg.channel.send("Please attach an image for the Google Lens search.")
-            return
-
-        image_attachment = new_msg.attachments[0]
-        image_url = image_attachment.url
-
-        serpapi_api_key = await api_key_manager.get_next_api_key('serpapi')
-        if not serpapi_api_key:
-            await new_msg.channel.send('No SerpApi API key available.')
-            return
-
-        try:
-            lens_results = await get_google_lens_results(image_url, api_key_manager)
-        except Exception as e:
-            await new_msg.channel.send(f"Error calling Google Lens API: {e}")
-            return
-
-        formatted_lens_results = await process_google_lens_results(lens_results, cfg, api_key_manager)
-
-        augmented_user_message = user_message_content + "\n\nRespond to my query based on the google lens results:\n" + formatted_lens_results
-
-        for message in messages:
-            if message['role'] == 'user':
-                message['content'] = augmented_user_message
-                msg_nodes[new_msg.id].text = augmented_user_message
-                break
-
-        msg_nodes[new_msg.id].internet_used = True
-    else:
-        urls_in_message = extract_urls_from_text(new_msg.content)
-        is_url_query = False
-        augmented_user_message = None
-        if urls_in_message:
-            contents = await fetch_urls_content(urls_in_message, api_key_manager, config=cfg)
-            augmented_user_message = (
-                new_msg.content + "\n\nRespond to my query based on the url content/s:\n"
-            )
-            for idx, (url, content) in enumerate(zip(urls_in_message, contents), start=1):
-                augmented_user_message += (
-                    f"url {idx}:\n{url}\nurl {idx} content:\n{content}\n\n"
-                )
-            is_url_query = True
-
-        if not is_url_query:
-            latest_user_query = await rephrase_query(messages, cfg, api_key_manager)
-            if latest_user_query != 'not_needed':
-                split_queries = await split_query(latest_user_query, cfg, api_key_manager)
-                serper_api_key = await api_key_manager.get_next_api_key('serper')
-                if not serper_api_key:
-                    await new_msg.channel.send('No Serper API key available.')
-                    return
-
-                msg_nodes[new_msg.id].serper_queries = split_queries
-                msg_nodes[new_msg.id].internet_used = True
-
-                search_results_list = await asyncio.gather(
-                    *[handle_search_query(q, api_key_manager, config=cfg) for q in split_queries]
-                )
-
-                search_results = ""
-                for idx, (query, result) in enumerate(zip(split_queries, search_results_list), start=1):
-                    search_results += f"Results for query {idx} ('{query}'):\n{result}\n\n"
-
-                augmented_user_message = new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
-                for message in messages:
-                    if message['role'] == 'user':
-                        message['content'] = augmented_user_message
-                        msg_nodes[new_msg.id].text = augmented_user_message
-                        break
-        else:
-            msg_nodes[new_msg.id].internet_used = True
-
-    # Generate and send response message(s)
-    response_msgs = []
-    response_contents = []
-    prev_chunk = None
-    edit_task = None
-
-    searched_for_text_added = False
-    serper_queries = getattr(msg_nodes[new_msg.id], 'serper_queries', None)
-    if serper_queries:
-        search_queries_text = ', '.join(f'"{q}"' for q in serper_queries)
-        searched_for_text = f'searched for: {search_queries_text}\n\n'
-    else:
-        searched_for_text = ''
-
-    kwargs = dict(
-        model=model,
-        messages=messages,
-        stream=True,
-        extra_body=cfg["extra_api_parameters"],
-    )
-
-    logging.info(
-        f"Payload being sent to LLM API:\n{json.dumps(kwargs, indent=2, default=str)}"
-    )
+    progress_message = await new_msg.channel.send("Processing your request...")
 
     try:
-        async with new_msg.channel.typing():
+        provider, model = cfg["model"].split("/", 1)
+        base_url = cfg["providers"][provider]["base_url"]
+        api_key = await api_key_manager.get_next_api_key(provider)
+        if not api_key:
+            api_key = 'sk-no-key-required'
+
+        openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+
+        accept_images = any(x in model.lower() for x in VISION_MODEL_TAGS)
+        accept_usernames = any(x in provider.lower() for x in PROVIDERS_SUPPORTING_USERNAMES)
+
+        max_text = cfg["max_text"]
+        max_images = cfg["max_images"] if accept_images else 0
+        max_messages = cfg["max_messages"]
+
+        use_plain_responses = cfg["use_plain_responses"]
+        max_message_length = (
+            2000 if use_plain_responses else (4096 - len(STREAMING_INDICATOR))
+        )
+
+        # Initialize messages list
+        messages = []
+        user_warnings = set()
+        curr_msg = new_msg
+        while curr_msg is not None and len(messages) < max_messages:
+            curr_node = msg_nodes.setdefault(curr_msg.id, MsgNode())
+
+            async with curr_node.lock:
+                if curr_node.text is None:
+                    good_attachments = {
+                        type: [
+                            att
+                            for att in curr_msg.attachments
+                            if att.content_type and type in att.content_type
+                        ]
+                        for type in ALLOWED_FILE_TYPES
+                    }
+
+                    curr_node.text = "\n".join(
+                        ([curr_msg.content] if curr_msg.content else [])
+                        + [embed.description for embed in curr_msg.embeds if embed.description]
+                        + [
+                            (await httpx_client.get(att.url)).text
+                            for att in good_attachments["text"]
+                        ]
+                    )
+                    if curr_node.text.startswith(discord_client.user.mention):
+                        curr_node.text = curr_node.text.replace(
+                            discord_client.user.mention, "", 1
+                        ).lstrip()
+
+                    curr_node.images = [
+                        dict(
+                            type="image_url",
+                            image_url=dict(
+                                url=f"data:{att.content_type};base64,{b64encode((await httpx_client.get(att.url)).content).decode('utf-8')}"
+                            ),
+                        )
+                        for att in good_attachments["image"]
+                    ]
+
+                    curr_node.role = (
+                        "assistant" if curr_msg.author == discord_client.user else "user"
+                    )
+
+                    curr_node.user_id = (
+                        curr_msg.author.id if curr_node.role == "user" else None
+                    )
+
+                    curr_node.has_bad_attachments = len(curr_msg.attachments) > sum(
+                        len(att_list) for att_list in good_attachments.values()
+                    )
+
+                    try:
+                        if (
+                            not curr_msg.reference
+                            and discord_client.user.mention not in curr_msg.content
+                            and (
+                                prev_msg_in_channel := (
+                                    [
+                                        m
+                                        async for m in curr_msg.channel.history(
+                                            before=curr_msg, limit=1
+                                        )
+                                    ]
+                                    or [None]
+                                )[0]
+                            )
+                            and any(
+                                prev_msg_in_channel.type == type
+                                for type in (
+                                    discord.MessageType.default,
+                                    discord.MessageType.reply,
+                                )
+                            )
+                            and prev_msg_in_channel.author
+                            == (
+                                discord_client.user
+                                if curr_msg.channel.type == discord.ChannelType.private
+                                else curr_msg.author
+                            )
+                        ):
+                            curr_node.next_msg = prev_msg_in_channel
+                        else:
+                            is_public_thread = (
+                                curr_msg.channel.type == discord.ChannelType.public_thread
+                            )
+                            next_is_parent_msg = (
+                                not curr_msg.reference
+                                and is_public_thread
+                                and curr_msg.channel.parent.type == discord.ChannelType.text
+                            )
+
+                            next_msg_id = (
+                                curr_msg.channel.id
+                                if next_is_parent_msg
+                                else getattr(curr_msg.reference, "message_id", None)
+                            )
+                            if next_msg_id:
+                                if next_is_parent_msg:
+                                    curr_node.next_msg = (
+                                        curr_msg.channel.starter_message
+                                        or await curr_msg.channel.parent.fetch_message(
+                                            next_msg_id
+                                        )
+                                    )
+                                else:
+                                    curr_node.next_msg = (
+                                        curr_msg.reference.cached_message
+                                        or await curr_msg.channel.fetch_message(next_msg_id)
+                                    )
+                    except (discord.NotFound, discord.HTTPException, AttributeError):
+                        logging.exception("Error fetching next message in the chain")
+                        curr_node.fetch_next_failed = True
+
+                if curr_node.images[:max_images]:
+                    content = (
+                        ([dict(type="text", text=curr_node.text[:max_text])]
+                         if curr_node.text[:max_text]
+                         else [])
+                        + curr_node.images[:max_images]
+                    )
+                else:
+                    content = curr_node.text[:max_text]
+
+                if content != "":
+                    message = dict(content=content, role=curr_node.role)
+                    if accept_usernames and curr_node.user_id is not None:
+                        message["name"] = str(curr_node.user_id)
+
+                    messages.append(message)
+
+                if len(curr_node.text) > max_text:
+                    user_warnings.add(f"⚠️ Max {max_text:,} characters per message")
+                if len(curr_node.images) > max_images:
+                    user_warnings.add(
+                        f"⚠️ Max {max_images} image{'' if max_images == 1 else 's'} per message"
+                        if max_images > 0
+                        else "⚠️ Can't see images"
+                    )
+                if curr_node.has_bad_attachments:
+                    user_warnings.add("⚠️ Unsupported attachments")
+                if curr_node.fetch_next_failed or (
+                    curr_node.next_msg is not None and len(messages) == max_messages
+                ):
+                    user_warnings.add(
+                        f"⚠️ Only using last {len(messages)} message{'' if len(messages) == 1 else 's'}"
+                    )
+
+                curr_msg = curr_node.next_msg
+
+        messages = messages[::-1]
+
+        logging.info(
+            f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}"
+        )
+
+        if system_prompt := cfg["system_prompt"]:
+            system_prompt_extras = [f"Today's date: {dt.now().strftime('%B %d, %Y')}."]
+            if accept_usernames:
+                system_prompt_extras.append(
+                    "User's names are their Discord IDs and should be typed as '<@ID>'."
+                )
+
+            full_system_prompt = "\n".join([system_prompt] + system_prompt_extras)
+            messages.insert(0, dict(role="system", content=full_system_prompt))
+
+        msg_nodes[new_msg.id].internet_used = False
+
+        user_message_content = new_msg.content
+
+        if user_message_content.lower().startswith('lens'):
+            user_message_content = user_message_content[len('lens'):].lstrip()
+
+            if len(new_msg.attachments) == 0:
+                await progress_message.edit(content="Please attach an image for the Google Lens search.")
+                return
+
+            image_attachment = new_msg.attachments[0]
+            image_url = image_attachment.url
+
+            serpapi_api_key = await api_key_manager.get_next_api_key('serpapi')
+            if not serpapi_api_key:
+                await progress_message.edit(content='No SerpApi API key available.')
+                return
+
+            try:
+                lens_results = await get_google_lens_results(image_url, api_key_manager)
+            except Exception as e:
+                await progress_message.edit(content=f"Error calling Google Lens API: {e}")
+                return
+
+            formatted_lens_results = await process_google_lens_results(lens_results, cfg, api_key_manager)
+
+            augmented_user_message = user_message_content + "\n\nRespond to my query based on the google lens results:\n" + formatted_lens_results
+
+            for message in messages:
+                if message['role'] == 'user':
+                    message['content'] = augmented_user_message
+                    msg_nodes[new_msg.id].text = augmented_user_message
+                    break
+
+            msg_nodes[new_msg.id].internet_used = True
+        else:
+            urls_in_message = extract_urls_from_text(new_msg.content)
+            is_url_query = False
+            augmented_user_message = None
+            if urls_in_message:
+                contents = await fetch_urls_content(urls_in_message, api_key_manager, config=cfg)
+                augmented_user_message = (
+                    new_msg.content + "\n\nRespond to my query based on the url content/s:\n"
+                )
+                for idx, (url, content) in enumerate(zip(urls_in_message, contents), start=1):
+                    augmented_user_message += (
+                        f"url {idx}:\n{url}\nurl {idx} content:\n{content}\n\n"
+                    )
+                is_url_query = True
+
+            if not is_url_query:
+                latest_user_query = await rephrase_query(messages, cfg, api_key_manager)
+                if latest_user_query != 'not_needed':
+                    split_queries = await split_query(latest_user_query, cfg, api_key_manager)
+                    serper_api_key = await api_key_manager.get_next_api_key('serper')
+                    if not serper_api_key:
+                        await progress_message.edit(content='No Serper API key available.')
+                        return
+
+                    msg_nodes[new_msg.id].serper_queries = split_queries
+                    msg_nodes[new_msg.id].internet_used = True
+
+                    search_results_list = await asyncio.gather(
+                        *[handle_search_query(q, api_key_manager, config=cfg) for q in split_queries]
+                    )
+
+                    search_results = ""
+                    for idx, (query, result) in enumerate(zip(split_queries, search_results_list), start=1):
+                        search_results += f"Results for query {idx} ('{query}'):\n{result}\n\n"
+
+                    augmented_user_message = new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
+                    for message in messages:
+                        if message['role'] == 'user':
+                            message['content'] = augmented_user_message
+                            msg_nodes[new_msg.id].text = augmented_user_message
+                            break
+            else:
+                msg_nodes[new_msg.id].internet_used = True
+
+        # Generate and send response message(s)
+        response_msgs = []
+        response_contents = []
+        prev_chunk = None
+        edit_task = None
+
+        searched_for_text_added = False
+        serper_queries = getattr(msg_nodes[new_msg.id], 'serper_queries', None)
+        if serper_queries:
+            search_queries_text = ', '.join(f'"{q}"' for q in serper_queries)
+            searched_for_text = f'searched for: {search_queries_text}\n\n'
+        else:
+            searched_for_text = ''
+
+        kwargs = dict(
+            model=model,
+            messages=messages,
+            stream=True,
+            extra_body=cfg["extra_api_parameters"],
+        )
+
+        logging.info(
+            f"Payload being sent to LLM API:\n{json.dumps(kwargs, indent=2, default=str)}"
+        )
+
+        try:
             async for curr_chunk in await openai_client.chat.completions.create(
                 **kwargs
             ):
@@ -500,21 +502,33 @@ async def on_message(new_msg):
 
                             view = OutputView(response_contents)
 
-                            reply_to_msg = (
-                                new_msg if response_msgs == [] else response_msgs[-1]
-                            )
-                            response_msg = await reply_to_msg.reply(
-                                embed=embed, view=view, silent=True
-                            )
-                            msg_nodes[response_msg.id] = MsgNode(
-                                next_msg=new_msg,
-                                internet_used=msg_nodes[
-                                    new_msg.id
-                                ].internet_used,
-                            )
-                            await msg_nodes[response_msg.id].lock.acquire()
-                            response_msgs.append(response_msg)
-                            last_task_time = dt.now().timestamp()
+                            if response_msgs == []:
+                                response_msg = await progress_message.edit(
+                                    content=None, embed=embed, view=view
+                                )
+                                msg_nodes[response_msg.id] = MsgNode(
+                                    next_msg=new_msg,
+                                    internet_used=msg_nodes[
+                                        new_msg.id
+                                    ].internet_used,
+                                )
+                                await msg_nodes[response_msg.id].lock.acquire()
+                                response_msgs.append(response_msg)
+                                last_task_time = dt.now().timestamp()
+                            else:
+                                reply_to_msg = response_msgs[-1]
+                                response_msg = await reply_to_msg.reply(
+                                    embed=embed, view=view, mention_author=False
+                                )
+                                msg_nodes[response_msg.id] = MsgNode(
+                                    next_msg=new_msg,
+                                    internet_used=msg_nodes[
+                                        new_msg.id
+                                    ].internet_used,
+                                )
+                                await msg_nodes[response_msg.id].lock.acquire()
+                                response_msgs.append(response_msg)
+                                last_task_time = dt.now().timestamp()
 
                     response_contents[-1] += prev_content
 
@@ -562,29 +576,43 @@ async def on_message(new_msg):
 
                 prev_chunk = curr_chunk
 
-        if use_plain_responses:
-            view = OutputView(response_contents)
+            if use_plain_responses:
+                view = OutputView(response_contents)
 
-            for content in response_contents:
-                reply_to_msg = new_msg if response_msgs == [] else response_msgs[-1]
-                response_msg = await reply_to_msg.reply(
-                    content=content, view=view, suppress_embeds=True
-                )
-                msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
-                await msg_nodes[response_msg.id].lock.acquire()
-                response_msgs.append(response_msg)
+                for content in response_contents:
+                    if response_msgs == []:
+                        response_msg = await progress_message.edit(
+                            content=content, view=view, suppress_embeds=True
+                        )
+                        msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
+                        await msg_nodes[response_msg.id].lock.acquire()
+                        response_msgs.append(response_msg)
+                    else:
+                        reply_to_msg = response_msgs[-1]
+                        response_msg = await reply_to_msg.reply(
+                            content=content, view=view, suppress_embeds=True, mention_author=False
+                        )
+                        msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
+                        await msg_nodes[response_msg.id].lock.acquire()
+                        response_msgs.append(response_msg)
+        except Exception:
+            logging.exception("Error while generating response")
+            await progress_message.edit(content="An error occurred while processing your request.")
+
+        for response_msg in response_msgs:
+            msg_nodes[response_msg.id].text = "".join(response_contents)
+            msg_nodes[response_msg.id].lock.release()
+
+        # Delete oldest MsgNodes from the cache
+        if (num_nodes := len(msg_nodes)) > MAX_MESSAGE_NODES:
+            for msg_id in sorted(msg_nodes.keys())[: num_nodes - MAX_MESSAGE_NODES]:
+                async with msg_nodes.setdefault(msg_id, MsgNode()).lock:
+                    msg_nodes.pop(msg_id, None)
+
     except Exception:
-        logging.exception("Error while generating response")
-
-    for response_msg in response_msgs:
-        msg_nodes[response_msg.id].text = "".join(response_contents)
-        msg_nodes[response_msg.id].lock.release()
-
-    # Delete oldest MsgNodes from the cache
-    if (num_nodes := len(msg_nodes)) > MAX_MESSAGE_NODES:
-        for msg_id in sorted(msg_nodes.keys())[: num_nodes - MAX_MESSAGE_NODES]:
-            async with msg_nodes.setdefault(msg_id, MsgNode()).lock:
-                msg_nodes.pop(msg_id, None)
+        logging.exception("Error in on_message handler")
+        await progress_message.edit(content="An error occurred while processing your request.")
+        return
 
 
 async def main():
