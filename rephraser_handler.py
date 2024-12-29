@@ -13,7 +13,7 @@ async def rephrase_query(messages, cfg, api_key_manager):
 
 Rephrase the latest user query **only if it requires external or web-based information** to be answered. If the query can be fully addressed using the current conversation context alone, or if it is a greeting, basic writing request, or task that doesn’t necessitate a web search, simply return `not_needed`.
 
-**If the user specifically requests a focus on a particular website (e.g., Reddit), append `site:[website]` to the rephrased query to ensure results are limited to that site. For example, if the user asks for Reddit-focused information, append `site:reddit.com` to the query. This mechanism should be adaptable to any website specified by the user.**
+**If the user specifically requests a focus on a particular website (e.g., Reddit), append `reddit` to the rephrased query to ensure results are limited to that site. For example, if the user asks for Reddit-focused information, append `reddit` to the query. This mechanism should be adaptable to any website specified by the user.**
 
 When a rephrasing is necessary, always enclose the rephrased query within the `latest_user_query` XML block.
 
@@ -133,17 +133,17 @@ Rephrased Latest user query:
 Source of the quote: [text in the image]  
 </latest_user_query>    
 
-<!-- Case 9: Query for the site:[site] feature -->  
+<!-- Case 9: Query for the append site name feature -->  
 Latest user query: Find Reddit discussions about the best budget laptops  
 Rephrased Latest user query:  
 <latest_user_query>  
-Best budget laptops site:reddit.com  
+Best budget laptops reddit
 </latest_user_query>  
 
 Latest user query: Search for Quora answers about time management tips  
 Rephrased Latest user query:  
 <latest_user_query>  
-Time management tips site:quora.com  
+Time management tips quora
 </latest_user_query>  
 
 </examples>
