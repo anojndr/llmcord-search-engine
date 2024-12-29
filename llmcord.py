@@ -77,24 +77,6 @@ msg_nodes = {}
 last_task_time = None
 
 
-class OutputView(View):
-    def __init__(self, contents):
-        super().__init__()
-        self.contents = contents
-
-    @discord.ui.button(label="Get Output as Text File", style=discord.ButtonStyle.primary)
-    async def send_text_file(self, interaction: discord.Interaction, button: discord.ui.Button):
-        full_content = "".join(self.contents)
-        file = io.StringIO(full_content)
-        await interaction.response.send_message(
-            content="Here is the output as a text file:",
-            file=File(file, filename="output.txt"),
-            ephemeral=True
-        )
-        button.disabled = True
-        await interaction.message.edit(view=self)
-
-
 @dataclass
 class MsgNode:
     text: Optional[str] = None
@@ -113,6 +95,24 @@ class MsgNode:
     serper_queries: Optional[list] = None
 
     internet_used: bool = False
+
+
+class OutputView(View):
+    def __init__(self, contents):
+        super().__init__()
+        self.contents = contents
+
+    @discord.ui.button(label="Get Output as Text File", style=discord.ButtonStyle.primary)
+    async def send_text_file(self, interaction: discord.Interaction, button: discord.ui.Button):
+        full_content = "".join(self.contents)
+        file = io.StringIO(full_content)
+        await interaction.response.send_message(
+            content="Here is the output as a text file:",
+            file=File(file, filename="output.txt"),
+            ephemeral=True
+        )
+        button.disabled = True
+        await interaction.message.edit(view=self)
 
 
 @discord_client.event
@@ -387,7 +387,17 @@ async def on_message(new_msg):
 
             for message in messages:
                 if message['role'] == 'user':
-                    message['content'] = augmented_user_message
+                    if isinstance(message['content'], list):
+                        # Replace the text part of the message content
+                        for part in message['content']:
+                            if part.get('type') == 'text':
+                                part['text'] = augmented_user_message
+                                break
+                        else:
+                            # No text part found, so insert one at the beginning
+                            message['content'].insert(0, {'type': 'text', 'text': augmented_user_message})
+                    else:
+                        message['content'] = augmented_user_message
                     msg_nodes[new_msg.id].text = augmented_user_message
                     break
 
@@ -430,10 +440,36 @@ async def on_message(new_msg):
                     augmented_user_message = new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
                     for message in messages:
                         if message['role'] == 'user':
-                            message['content'] = augmented_user_message
+                            if isinstance(message['content'], list):
+                                # Replace the text part of the message content
+                                for part in message['content']:
+                                    if part.get('type') == 'text':
+                                        part['text'] = augmented_user_message
+                                        break
+                                else:
+                                    # No text part found, so insert one at the beginning
+                                    message['content'].insert(0, {'type': 'text', 'text': augmented_user_message})
+                            else:
+                                message['content'] = augmented_user_message
                             msg_nodes[new_msg.id].text = augmented_user_message
                             break
             else:
+                # Set the augmented message content for URL queries
+                for message in messages:
+                    if message['role'] == 'user':
+                        if isinstance(message['content'], list):
+                            # Replace the text part of the message content
+                            for part in message['content']:
+                                if part.get('type') == 'text':
+                                    part['text'] = augmented_user_message
+                                    break
+                            else:
+                                # No text part found, so insert one at the beginning
+                                message['content'].insert(0, {'type': 'text', 'text': augmented_user_message})
+                        else:
+                            message['content'] = augmented_user_message
+                        msg_nodes[new_msg.id].text = augmented_user_message
+                        break
                 msg_nodes[new_msg.id].internet_used = True
 
         # Generate and send response message(s)

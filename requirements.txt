@@ -6,3 +6,4 @@ html2text
 google-api-python-client
 youtube-transcript-api
 asyncpraw
+PyPDF2
