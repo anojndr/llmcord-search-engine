@@ -2,7 +2,7 @@ import asyncio
 from url_handler import fetch_urls_content
 import httpx
 
-async def handle_search_query(query, api_key_manager, max_urls=10, config=None):
+async def handle_search_query(query, api_key_manager, max_urls=5, config=None):
     if config is None:
         config = {}
 
