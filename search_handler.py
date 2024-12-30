@@ -2,9 +2,11 @@ import asyncio
 from url_handler import fetch_urls_content
 import httpx
 
-async def handle_search_query(query, api_key_manager, max_urls=5, config=None):
+async def handle_search_query(query, api_key_manager, config=None):
     if config is None:
         config = {}
+
+    max_urls = config.get('max_urls', 5)
 
     api_key = await api_key_manager.get_next_api_key('serper')
     if not api_key:

@@ -99,3 +99,6 @@ reddit_credentials:
     client_secret: your-reddit-client-secret-2
     user_agent: your-reddit-user-agent-2
   # Add more credentials as needed
+
+# Maximum number of URLs to fetch and process in search queries
+max_urls: 10
