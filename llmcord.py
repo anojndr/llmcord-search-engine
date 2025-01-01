@@ -388,17 +388,14 @@ async def on_message(new_msg):
             for message in messages:
                 if message['role'] == 'user':
                     if isinstance(message['content'], list):
-                        # Replace the text part of the message content
                         for part in message['content']:
                             if part.get('type') == 'text':
                                 part['text'] = augmented_user_message
                                 break
                         else:
-                            # No text part found, so insert one at the beginning
                             message['content'].insert(0, {'type': 'text', 'text': augmented_user_message})
                     else:
                         message['content'] = augmented_user_message
-                    msg_nodes[new_msg.id].text = augmented_user_message
                     break
 
             msg_nodes[new_msg.id].internet_used = True
@@ -438,38 +435,21 @@ async def on_message(new_msg):
                         search_results += f"Results for query {idx} ('{query}'):\n{result}\n\n"
 
                     augmented_user_message = new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
-                    for message in messages:
-                        if message['role'] == 'user':
-                            if isinstance(message['content'], list):
-                                # Replace the text part of the message content
-                                for part in message['content']:
-                                    if part.get('type') == 'text':
-                                        part['text'] = augmented_user_message
-                                        break
-                                else:
-                                    # No text part found, so insert one at the beginning
-                                    message['content'].insert(0, {'type': 'text', 'text': augmented_user_message})
-                            else:
-                                message['content'] = augmented_user_message
-                            msg_nodes[new_msg.id].text = augmented_user_message
-                            break
-            else:
-                # Set the augmented message content for URL queries
+
+            if augmented_user_message:
                 for message in messages:
                     if message['role'] == 'user':
                         if isinstance(message['content'], list):
-                            # Replace the text part of the message content
                             for part in message['content']:
                                 if part.get('type') == 'text':
                                     part['text'] = augmented_user_message
                                     break
                             else:
-                                # No text part found, so insert one at the beginning
                                 message['content'].insert(0, {'type': 'text', 'text': augmented_user_message})
                         else:
                             message['content'] = augmented_user_message
-                        msg_nodes[new_msg.id].text = augmented_user_message
                         break
+
                 msg_nodes[new_msg.id].internet_used = True
 
         # Generate and send response message(s)
