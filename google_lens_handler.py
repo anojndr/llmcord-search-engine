@@ -1,6 +1,6 @@
 import asyncio
 import httpx
-import html2text
+from bs4 import BeautifulSoup
 
 from youtube_handler import fetch_youtube_content
 from reddit_handler import fetch_reddit_content
@@ -71,9 +71,12 @@ async def process_visual_match(idx, url, title, config, api_key_manager):
                 response.raise_for_status()
                 if 'text/html' in response.headers.get('Content-Type', ''):
                     html_content = response.text
-                    text_maker = html2text.HTML2Text()
-                    text_maker.ignore_images = True
-                    text_content = text_maker.handle(html_content)
+                    soup = BeautifulSoup(html_content, 'lxml')
+                    # Remove script and style elements
+                    for script_or_style in soup(['script', 'style']):
+                        script_or_style.decompose()
+                    # Get text
+                    text_content = soup.get_text(separator=' ', strip=True)
                 else:
                     text_content = response.text
                 content = text_content.strip()

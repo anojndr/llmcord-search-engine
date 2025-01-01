@@ -1,6 +1,6 @@
 import asyncio
 import re
-import html2text
+from bs4 import BeautifulSoup
 import httpx
 from youtube_handler import fetch_youtube_content
 from reddit_handler import fetch_reddit_content
@@ -44,9 +44,12 @@ async def fetch_urls_content(urls, api_key_manager, config=None):
                             text_content = f"Error extracting text from PDF at {url}: {e}"
                     elif 'text/html' in content_type:
                         html_content = response.text
-                        text_maker = html2text.HTML2Text()
-                        text_maker.ignore_images = True
-                        text_content = text_maker.handle(html_content)
+                        soup = BeautifulSoup(html_content, 'lxml')
+                        # Remove script and style elements
+                        for script_or_style in soup(['script', 'style']):
+                            script_or_style.decompose()
+                        # Get text
+                        text_content = soup.get_text(separator=' ', strip=True)
                     else:
                         text_content = response.text
                     return text_content.strip()
