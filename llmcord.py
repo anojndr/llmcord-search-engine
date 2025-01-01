@@ -385,11 +385,18 @@ async def on_message(new_msg):
 
             augmented_user_message = user_message_content + "\n\nRespond to my query based on the google lens results:\n" + formatted_lens_results
 
-            new_user_message = {
-                'role': 'user',
-                'content': augmented_user_message
-            }
-            messages.append(new_user_message)
+            for message in reversed(messages):
+                if message['role'] == 'user':
+                    if isinstance(message['content'], list):
+                        for part in message['content']:
+                            if part.get('type') == 'text':
+                                part['text'] = augmented_user_message
+                                break
+                        else:
+                            message['content'].insert(0, {'type': 'text', 'text': augmented_user_message})
+                    else:
+                        message['content'] = augmented_user_message
+                    break
 
             msg_nodes[new_msg.id].text = augmented_user_message
             msg_nodes[new_msg.id].internet_used = True
@@ -430,14 +437,22 @@ async def on_message(new_msg):
 
                     augmented_user_message = new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
 
-            new_user_message = {
-                'role': 'user',
-                'content': augmented_user_message
-            }
-            messages.append(new_user_message)
+            if augmented_user_message:
+                for message in reversed(messages):
+                    if message['role'] == 'user':
+                        if isinstance(message['content'], list):
+                            for part in message['content']:
+                                if part.get('type') == 'text':
+                                    part['text'] = augmented_user_message
+                                    break
+                            else:
+                                message['content'].insert(0, {'type': 'text', 'text': augmented_user_message})
+                        else:
+                            message['content'] = augmented_user_message
+                        break
 
-            msg_nodes[new_msg.id].text = augmented_user_message
-            msg_nodes[new_msg.id].internet_used = True
+                msg_nodes[new_msg.id].text = augmented_user_message
+                msg_nodes[new_msg.id].internet_used = True
 
         # Generate and send response message(s)
         response_msgs = []
