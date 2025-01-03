@@ -117,7 +117,7 @@ class OutputView(View):
 
 @discord_client.event
 async def on_message(new_msg):
-    global msg_nodes, last_task_time
+    global msg_nodes, last_task_time, httpx_client
 
     is_dm = new_msg.channel.type == discord.ChannelType.private
 
@@ -166,7 +166,12 @@ async def on_message(new_msg):
     if is_bad_channel or is_bad_user:
         return
 
-    progress_message = await new_msg.channel.send("Processing your request...")
+    allowed_mentions = discord.AllowedMentions.none()
+    progress_message = await new_msg.reply(
+        "Processing your request...",
+        mention_author=False,
+        allowed_mentions=allowed_mentions
+    )
 
     try:
         provider, model = cfg["model"].split("/", 1)
@@ -189,7 +194,6 @@ async def on_message(new_msg):
             2000 if use_plain_responses else (4096 - len(STREAMING_INDICATOR))
         )
 
-        # Initialize messages list
         messages = []
         user_warnings = set()
         curr_msg = new_msg
@@ -364,7 +368,7 @@ async def on_message(new_msg):
             user_message_content = user_message_content[len('lens'):].lstrip()
 
             if len(new_msg.attachments) == 0:
-                await progress_message.edit(content="Please attach an image for the Google Lens search.")
+                await progress_message.edit(content="Please attach an image for the Google Lens search.", allowed_mentions=allowed_mentions)
                 return
 
             image_attachment = new_msg.attachments[0]
@@ -372,16 +376,16 @@ async def on_message(new_msg):
 
             serpapi_api_key = await api_key_manager.get_next_api_key('serpapi')
             if not serpapi_api_key:
-                await progress_message.edit(content='No SerpApi API key available.')
+                await progress_message.edit(content='No SerpApi API key available.', allowed_mentions=allowed_mentions)
                 return
 
             try:
-                lens_results = await get_google_lens_results(image_url, api_key_manager)
+                lens_results = await get_google_lens_results(image_url, api_key_manager, httpx_client)
             except Exception as e:
-                await progress_message.edit(content=f"Error calling Google Lens API: {e}")
+                await progress_message.edit(content=f"Error calling Google Lens API: {e}", allowed_mentions=allowed_mentions)
                 return
 
-            formatted_lens_results = await process_google_lens_results(lens_results, cfg, api_key_manager)
+            formatted_lens_results = await process_google_lens_results(lens_results, cfg, api_key_manager, httpx_client)
 
             augmented_user_message = user_message_content + "\n\nRespond to my query based on the google lens results:\n" + formatted_lens_results
 
@@ -405,7 +409,7 @@ async def on_message(new_msg):
             is_url_query = False
             augmented_user_message = None
             if urls_in_message:
-                contents = await fetch_urls_content(urls_in_message, api_key_manager, config=cfg)
+                contents = await fetch_urls_content(urls_in_message, api_key_manager, httpx_client, config=cfg)
                 augmented_user_message = (
                     new_msg.content + "\n\nRespond to my query based on the url content/s:\n"
                 )
@@ -421,14 +425,14 @@ async def on_message(new_msg):
                     split_queries = await split_query(latest_user_query, cfg, api_key_manager)
                     serper_api_key = await api_key_manager.get_next_api_key('serper')
                     if not serper_api_key:
-                        await progress_message.edit(content='No Serper API key available.')
+                        await progress_message.edit(content='No Serper API key available.', allowed_mentions=allowed_mentions)
                         return
 
                     msg_nodes[new_msg.id].serper_queries = split_queries
                     msg_nodes[new_msg.id].internet_used = True
 
                     search_results_list = await asyncio.gather(
-                        *[handle_search_query(q, api_key_manager, config=cfg) for q in split_queries]
+                        *[handle_search_query(q, api_key_manager, httpx_client, config=cfg) for q in split_queries]
                     )
 
                     search_results = ""
@@ -454,7 +458,6 @@ async def on_message(new_msg):
                 msg_nodes[new_msg.id].text = augmented_user_message
                 msg_nodes[new_msg.id].internet_used = True
 
-        # Generate and send response message(s)
         response_msgs = []
         response_contents = []
         prev_chunk = None
@@ -522,7 +525,7 @@ async def on_message(new_msg):
 
                             if response_msgs == []:
                                 response_msg = await progress_message.edit(
-                                    content=None, embed=embed, view=view
+                                    content=None, embed=embed, view=view, allowed_mentions=allowed_mentions
                                 )
                                 msg_nodes[response_msg.id] = MsgNode(
                                     next_msg=new_msg,
@@ -536,7 +539,7 @@ async def on_message(new_msg):
                             else:
                                 reply_to_msg = response_msgs[-1]
                                 response_msg = await reply_to_msg.reply(
-                                    embed=embed, view=view, mention_author=False
+                                    embed=embed, view=view, mention_author=False, allowed_mentions=allowed_mentions
                                 )
                                 msg_nodes[response_msg.id] = MsgNode(
                                     next_msg=new_msg,
@@ -588,7 +591,7 @@ async def on_message(new_msg):
                             embed.set_footer(text=footer_text)
 
                             edit_task = asyncio.create_task(
-                                response_msgs[-1].edit(embed=embed, view=view)
+                                response_msgs[-1].edit(embed=embed, view=view, allowed_mentions=allowed_mentions)
                             )
                             last_task_time = dt.now().timestamp()
 
@@ -600,7 +603,7 @@ async def on_message(new_msg):
                 for content in response_contents:
                     if response_msgs == []:
                         response_msg = await progress_message.edit(
-                            content=content, view=view, suppress_embeds=True
+                            content=content, view=view, suppress_embeds=True, allowed_mentions=allowed_mentions
                         )
                         msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
                         await msg_nodes[response_msg.id].lock.acquire()
@@ -608,20 +611,19 @@ async def on_message(new_msg):
                     else:
                         reply_to_msg = response_msgs[-1]
                         response_msg = await reply_to_msg.reply(
-                            content=content, view=view, suppress_embeds=True, mention_author=False
+                            content=content, view=view, suppress_embeds=True, mention_author=False, allowed_mentions=allowed_mentions
                         )
                         msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
                         await msg_nodes[response_msg.id].lock.acquire()
                         response_msgs.append(response_msg)
         except Exception:
             logging.exception("Error while generating response")
-            await progress_message.edit(content="An error occurred while processing your request.")
+            await progress_message.edit(content="An error occurred while processing your request.", allowed_mentions=allowed_mentions)
 
         for response_msg in response_msgs:
             msg_nodes[response_msg.id].text = "".join(response_contents)
             msg_nodes[response_msg.id].lock.release()
 
-        # Delete oldest MsgNodes from the cache
         if (num_nodes := len(msg_nodes)) > MAX_MESSAGE_NODES:
             for msg_id in sorted(msg_nodes.keys())[: num_nodes - MAX_MESSAGE_NODES]:
                 async with msg_nodes.setdefault(msg_id, MsgNode()).lock:
@@ -629,12 +631,15 @@ async def on_message(new_msg):
 
     except Exception:
         logging.exception("Error in on_message handler")
-        await progress_message.edit(content="An error occurred while processing your request.")
+        await progress_message.edit(content="An error occurred while processing your request.", allowed_mentions=allowed_mentions)
         return
 
 
 async def main():
-    await discord_client.start(cfg["bot_token"])
+    try:
+        await discord_client.start(cfg["bot_token"])
+    finally:
+        await httpx_client.aclose()
 
 
 asyncio.run(main())

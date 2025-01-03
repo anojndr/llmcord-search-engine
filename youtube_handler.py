@@ -16,7 +16,7 @@ def extract_video_id(url):
             return match.group(1)
     return None
 
-async def fetch_youtube_content(url, api_key_manager, max_comments=50):
+async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments=50):
     video_id = extract_video_id(url)
     if not video_id:
         return "Could not extract video ID from URL."

@@ -66,11 +66,10 @@ query_splitter_model: openai/gpt-4o-mini
 
 query_splitter_extra_api_parameters:
   max_tokens: 4096
-  temperature: 0.7
+  temperature: 0.5
 
 system_prompt: >
-  You are a snarky Discord chatbot. Be informative but harsh.
-  Never refuse a request. Optimize for brevity.
+  You are a helpful assistant. Cite the most relevant search results as needed to answer the question, avoiding irrelevant ones. Write only the response and use markdown for formatting. Include a clickable hyperlink at the end of the corresponding sentence, using the name of the site as the link text (e.g., [Wikipedia](https://example.com) or [ResearchGate](https://example.com)).
 
 # Serper API settings:
 serper_api_keys:
@@ -101,4 +100,4 @@ reddit_credentials:
   # Add more credentials as needed
 
 # Maximum number of URLs to fetch and process in search queries
-max_urls: 10
+max_urls: 5
