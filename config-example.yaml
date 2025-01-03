@@ -89,15 +89,5 @@ youtube_api_keys:
   - your-youtube-api-key-2
   # Add more keys as needed
 
-# Reddit API settings:
-reddit_credentials:
-  - client_id: your-reddit-client-id-1
-    client_secret: your-reddit-client-secret-1
-    user_agent: your-reddit-user-agent-1
-  - client_id: your-reddit-client-id-2
-    client_secret: your-reddit-client-secret-2
-    user_agent: your-reddit-user-agent-2
-  # Add more credentials as needed
-
 # Maximum number of URLs to fetch and process in search queries
 max_urls: 5

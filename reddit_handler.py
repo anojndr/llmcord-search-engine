@@ -1,61 +1,66 @@
-import re
+import httpx
 
-async def fetch_reddit_content(url, api_key_manager, httpx_client):
+def _parse_comment_tree(children, comment_list):
     """
-    Fetches Reddit content by adding .json to the URL and parsing the returned JSON
-    rather than using asyncpraw.
+    Recursively traverse Reddit 't1' comments, appending each comment's body to comment_list.
     """
-    # Ensure the URL ends with ".json"
-    if not url.endswith('.json'):
-        if url.endswith('/'):
-            url += '.json'
-        else:
-            url += '/.json'
+    for child in children:
+        if child.get('kind') == 't1':
+            data = child.get('data', {})
+            body = data.get('body', '')
+            if body:
+                comment_list.append(body)
+            replies = data.get('replies')
+            if isinstance(replies, dict):
+                new_children = replies.get('data', {}).get('children', [])
+                _parse_comment_tree(new_children, comment_list)
 
-    def traverse_comments(children, all_comments):
-        """
-        Recursively collect all comment bodies (including replies) into all_comments.
-        """
-        for child in children:
-            kind = child.get('kind')
-            if kind == 't1':
-                # This is a standard comment
-                comment_body = child['data'].get('body', '[deleted]')
-                all_comments.append(comment_body)
-                replies = child['data'].get('replies')
-                if isinstance(replies, dict):
-                    more_children = replies['data'].get('children', [])
-                    traverse_comments(more_children, all_comments)
-            elif kind == 'more':
-                # If you want to handle 'more' items, do so here. We'll skip them.
-                pass
+async def fetch_reddit_content(url, api_key_manager, httpx_client=None):
+    """
+    Fetches Reddit submission + comments by appending .json to the final redirect URL
+    and parsing the returned JSON structure (which typically consists of two listings).
+    """
+    if httpx_client is None:
+        httpx_client = httpx.AsyncClient()
 
     try:
-        # Make a direct request to Reddit's .json endpoint
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = await httpx_client.get(url, headers=headers, timeout=10)
-        resp.raise_for_status()
+        response = await httpx_client.get(url, follow_redirects=True)
+        response.raise_for_status()
+        final_url = str(response.url)
 
-        data = resp.json()
-        if not isinstance(data, list) or len(data) < 2:
-            return "Unexpected Reddit JSON structure."
+        base, sep, query = final_url.partition('?')
+        if sep:  
+            json_url = base.rstrip('/') + '.json?' + query
+        else:
+            json_url = base.rstrip('/') + '.json'
 
-        # The first element in data is the submission (thread) listing
-        post_data = data[0]['data']['children'][0]['data']
-        title = post_data.get('title', '[no title]')
-        selftext = post_data.get('selftext', '[no selftext]')
+        json_response = await httpx_client.get(json_url, follow_redirects=True)
+        json_response.raise_for_status()
+        data = json_response.json()
 
-        # The second element in data is the top-level comments listing
-        comments_list = data[1]['data']['children']
-        all_comments = []
-        traverse_comments(comments_list, all_comments)
+        if not isinstance(data, list) or len(data) < 1:
+            return "No valid data received from Reddit."
 
-        # Construct output with post info plus enumerated comments
-        output = f"Title: {title}\n\nSelftext:\n{selftext}\n\nComments:\n"
-        for i, comment in enumerate(all_comments, start=1):
-            output += f"{i}. {comment}\n"
+        first_listing = data[0]
+        submission_children = first_listing.get('data', {}).get('children', [])
+        if not submission_children:
+            return "No submission data found."
 
-        return output
+        submission_data = submission_children[0].get('data', {})
+        title = submission_data.get('title', '')
+        selftext = submission_data.get('selftext', '')
+
+        comments_list = []
+        if len(data) > 1:
+            second_listing = data[1]
+            comments_children = second_listing.get('data', {}).get('children', [])
+            _parse_comment_tree(comments_children, comments_list)
+
+        content = f"Title: {title}\n\nSelftext:\n{selftext}\n\nComments:\n"
+        for idx, comment in enumerate(comments_list, start=1):
+            content += f"{idx}. {comment}\n"
+
+        return content.strip() or "No content found."
 
     except Exception as e:
         return f"Error fetching Reddit content: {e}"
