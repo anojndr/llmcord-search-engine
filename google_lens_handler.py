@@ -62,7 +62,7 @@ async def process_visual_match(idx, url, title, config, api_key_manager, httpx_c
     if is_youtube_url(url):
         content = await fetch_youtube_content(url, api_key_manager, httpx_client)
     elif is_reddit_url(url):
-        content = await fetch_reddit_content(url, api_key_manager)
+        content = await fetch_reddit_content(url, api_key_manager, httpx_client)
     else:
         try:
             response = await httpx_client.get(url, timeout=10.0, follow_redirects=True)

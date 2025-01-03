@@ -21,12 +21,14 @@ async def fetch_urls_content(urls, api_key_manager, httpx_client, config=None):
             content = await fetch_youtube_content(url, api_key_manager, httpx_client)
             return content
         elif 'reddit.com' in url or 'redd.it' in url:
-            content = await fetch_reddit_content(url, api_key_manager)
+            content = await fetch_reddit_content(url, api_key_manager, httpx_client)
+            return content
         else:
             try:
                 response = await httpx_client.get(url, timeout=10.0, follow_redirects=True)
                 response.raise_for_status()
                 content_type = response.headers.get('Content-Type', '')
+
                 if 'application/pdf' in content_type:
                     pdf_bytes = response.content
                     try:
@@ -48,7 +50,9 @@ async def fetch_urls_content(urls, api_key_manager, httpx_client, config=None):
                     text_content = soup.get_text(separator=' ', strip=True)
                 else:
                     text_content = response.text
+
                 return text_content.strip()
+
             except Exception as e:
                 return f"Error fetching content from {url}: {e}"
 
