@@ -2,7 +2,7 @@ import asyncio
 from url_handler import fetch_urls_content
 import httpx
 
-async def handle_search_query(query, api_key_manager, config=None):
+async def handle_search_query(query, api_key_manager, httpx_client, config=None):
     if config is None:
         config = {}
 
@@ -22,10 +22,9 @@ async def handle_search_query(query, api_key_manager, config=None):
     }
 
     try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post('https://google.serper.dev/search', json=data, headers=headers)
-            response.raise_for_status()
-            data = response.json()
+        response = await httpx_client.post('https://google.serper.dev/search', json=data, headers=headers)
+        response.raise_for_status()
+        data = response.json()
     except Exception as e:
         return f"Error fetching search results: {e}"
 
@@ -36,7 +35,7 @@ async def handle_search_query(query, api_key_manager, config=None):
             if len(urls) >= max_urls:
                 break
 
-    contents = await fetch_urls_content(urls, api_key_manager, config=config)
+    contents = await fetch_urls_content(urls, api_key_manager, httpx_client, config=config)
 
     results = []
     for idx, (url, content) in enumerate(zip(urls, contents), start=1):
