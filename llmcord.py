@@ -24,6 +24,9 @@ import io
 
 from api_key_manager import APIKeyManager
 
+from keep_alive import keep_alive
+keep_alive()
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
