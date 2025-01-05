@@ -85,7 +85,7 @@ if client_id := cfg["client_id"]:
 intents = discord.Intents.default()
 intents.message_content = True
 activity = discord.Game(
-    name=(cfg["status_message"] or "https://github.com/anojndr/llmcord")[:128]
+    name=(cfg["status_message"] or "https://github.com/anojndr/llmcord-search-engine")[:128]
 )
 discord_client = discord.Client(intents=intents, activity=activity)
 
