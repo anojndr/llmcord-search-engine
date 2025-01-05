@@ -1,6 +1,6 @@
 import asyncio
 import re
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 import httpx
 from youtube_handler import fetch_youtube_content
 from reddit_handler import fetch_reddit_content
@@ -28,6 +28,7 @@ async def fetch_urls_content(urls, api_key_manager, httpx_client, config=None):
                 response = await httpx_client.get(url, timeout=10.0, follow_redirects=True)
                 response.raise_for_status()
                 content_type = response.headers.get('Content-Type', '')
+
                 if 'application/pdf' in content_type:
                     pdf_bytes = response.content
                     try:
@@ -44,12 +45,16 @@ async def fetch_urls_content(urls, api_key_manager, httpx_client, config=None):
                 elif 'text/html' in content_type:
                     html_content = response.text
                     soup = BeautifulSoup(html_content, 'lxml')
-                    for script_or_style in soup(['script', 'style']):
-                        script_or_style.decompose()
+                    for tag in soup(['script', 'style', 'header', 'footer', 'nav', 'aside', 'form', 'svg', 'canvas']):
+                        tag.decompose()
+                    for c in soup.find_all(text=lambda text: isinstance(text, Comment)):
+                        c.extract()
                     text_content = soup.get_text(separator=' ', strip=True)
                 else:
                     text_content = response.text
+
                 return text_content.strip()
+
             except Exception as e:
                 return f"Error fetching content from {url}: {e}"
 

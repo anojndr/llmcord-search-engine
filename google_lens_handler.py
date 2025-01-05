@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 
 from youtube_handler import fetch_youtube_content
 from reddit_handler import fetch_reddit_content
@@ -103,8 +103,10 @@ async def process_visual_match(idx, url, title, config, api_key_manager, httpx_c
             if 'text/html' in content_type:
                 html_content = response.text
                 soup = BeautifulSoup(html_content, 'lxml')
-                for script_or_style in soup(['script', 'style']):
-                    script_or_style.decompose()
+                for tag in soup(['script', 'style', 'header', 'footer', 'nav', 'aside', 'form', 'svg', 'canvas']):
+                    tag.decompose()
+                for c in soup.find_all(text=lambda text: isinstance(text, Comment)):
+                    c.extract()
                 text_content = soup.get_text(separator=' ', strip=True)
             else:
                 text_content = response.text
