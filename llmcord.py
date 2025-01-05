@@ -6,6 +6,7 @@ from datetime import datetime as dt
 import json
 import logging
 from typing import Literal, Optional
+import os
 
 import discord
 import httpx
@@ -55,8 +56,22 @@ MAX_MESSAGE_NODES = 100
 
 
 def get_config(filename="config.yaml"):
-    with open(filename, "r") as file:
-        return yaml.safe_load(file)
+    """
+    Attempts to load config.yaml first from the current directory,
+    then from /etc/secrets/<filename>.
+    """
+    if os.path.exists(filename):
+        with open(filename, "r") as file:
+            return yaml.safe_load(file)
+
+    alt_filename = os.path.join("/etc/secrets", filename)
+    if os.path.exists(alt_filename):
+        with open(alt_filename, "r") as file:
+            return yaml.safe_load(file)
+
+    raise FileNotFoundError(
+        f"config.yaml not found in current directory or at {alt_filename}"
+    )
 
 
 cfg = get_config()
