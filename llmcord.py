@@ -142,18 +142,15 @@ async def on_message(new_msg):
     at_ai_pattern = r'\bat ai\b'
 
     if (
-        not is_dm and
-        not re.search(at_ai_pattern, new_msg.content.lower()) and
-        discord_client.user not in new_msg.mentions
+        not is_dm
+        and not re.search(at_ai_pattern, new_msg.content, re.IGNORECASE)
+        and discord_client.user not in new_msg.mentions
     ) or new_msg.author.bot:
         return
 
-    content_without_at_ai = re.sub(at_ai_pattern, '', new_msg.content.lower())
+    content_without_at_ai = re.sub(at_ai_pattern, '', new_msg.content, flags=re.IGNORECASE)
     content_without_mentions = content_without_at_ai.replace(discord_client.user.mention, '').lstrip()
     new_msg.content = content_without_mentions
-
-    if not new_msg.content.strip():
-        new_msg.content = "hi"
 
     cfg = get_config()
 
