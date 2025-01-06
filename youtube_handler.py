@@ -74,6 +74,7 @@ def extract_video_id(url):
             return match.group(1)
     return None
 
+
 async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments=50):
     """
     Given a YouTube URL, fetch metadata (title, channel name), transcript (if available),
