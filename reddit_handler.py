@@ -20,7 +20,7 @@ def _find_proxies_file(filename="proxies.txt"):
 
 def load_proxies(filename="proxies.txt"):
     """
-    Loads proxies from the specified file.
+    Loads proxies from the specified file. Each line can be a simple URL or include user:pass.
     Returns a list of proxy URLs, or an empty list if the file is not found or empty.
     """
     filepath = _find_proxies_file(filename)
@@ -30,13 +30,21 @@ def load_proxies(filename="proxies.txt"):
         with open(filepath, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
-                if not line:
-                    continue
-                parts = line.split(':')
-                if len(parts) == 4:
-                    ip, port, user, password = parts
-                    proxy_url = f"http://{user}:{password}@{ip}:{port}"
-                    proxies.append(proxy_url)
+                if line:
+                    if '@' not in line and ':' in line:
+                        parts = line.split(':')
+                        if len(parts) == 2:
+                            ip, port = parts
+                            proxy_url = f"http://{ip}:{port}"
+                        elif len(parts) == 4:
+                            ip, port, user, password = parts
+                            proxy_url = f"http://{user}:{password}@{ip}:{port}"
+                        else:
+                            continue
+                        proxies.append(proxy_url)
+                    else:
+                        proxies.append(line)
+
     else:
         logger.warning("No proxies file found.")
     return proxies
