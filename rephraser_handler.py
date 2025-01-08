@@ -4,6 +4,9 @@ import re
 
 from openai import AsyncOpenAI
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
 async def rephrase_query(messages, cfg, api_key_manager):
     rephraser_messages = [dict(m) for m in messages]
 
@@ -182,7 +185,7 @@ Latest user query:'''
                 rephraser_messages[i]['content'] = rephraser_instruction + '\n' + str(original_content)
             break
     else:
-        logging.warning("No user message found to prepend the rephraser instruction.")
+        logger.warning("No user message found to prepend the rephraser instruction.")
 
     rephraser_openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
 
@@ -193,7 +196,7 @@ Latest user query:'''
         extra_body=cfg.get('rephraser_extra_api_parameters', {})
     )
 
-    logging.info(f"Payload being sent to LLM API for rephraser:\n{json.dumps(kwargs, indent=2, default=str)}")
+    logger.info(f"Payload being sent to LLM API for rephraser:\n{json.dumps(kwargs, indent=2, default=str)}")
 
     try:
         response = await rephraser_openai_client.chat.completions.create(**kwargs)
@@ -204,8 +207,8 @@ Latest user query:'''
             latest_user_query = match.group(1).strip()
             return latest_user_query
         else:
-            logging.warning("No <latest_user_query> tags found in rephraser response.")
+            logger.warning("No <latest_user_query> tags found in rephraser response.")
             return 'not_needed'
     except Exception as e:
-        logging.exception("Error while calling rephraser model")
+        logger.exception("Error while calling rephraser model")
         return 'not_needed'

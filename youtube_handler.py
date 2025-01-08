@@ -8,6 +8,9 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
 def _find_proxies_file(filename="proxies.txt"):
     """
     Attempts to find a file named 'proxies.txt' first in the current directory,
@@ -24,7 +27,7 @@ PROXIES_FILE = _find_proxies_file()
 proxies_list = []
 
 if PROXIES_FILE:
-    logging.info("Loading proxies from %s", PROXIES_FILE)
+    logger.info("Loading proxies from %s", PROXIES_FILE)
     with open(PROXIES_FILE, 'r', encoding='utf-8') as f:
         for line in f:
             line = line.strip()
@@ -36,7 +39,7 @@ if PROXIES_FILE:
                 proxy_url = f"http://{user}:{password}@{ip}:{port}"
                 proxies_list.append(proxy_url)
 else:
-    logging.warning("No proxies file found in the current directory or /etc/secrets.")
+    logger.warning("No proxies file found in the current directory or /etc/secrets.")
 
 def get_random_proxy():
     """
@@ -74,7 +77,6 @@ def extract_video_id(url):
             return match.group(1)
     return None
 
-
 async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments=50):
     """
     Given a YouTube URL, fetch metadata (title, channel name), transcript (if available),
@@ -96,12 +98,12 @@ async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments
     try:
         youtube = build('youtube', 'v3', developerKey=api_key)
 
-        logging.info("Fetching YouTube video info for video_id=%s", video_id)
+        logger.info("Fetching YouTube video info for video_id=%s", video_id)
         video_response = youtube.videos().list(
             part='snippet,contentDetails,status,statistics',
             id=video_id
         ).execute()
-        logging.info("video_response: %s", video_response)
+        logger.info("video_response: %s", video_response)
 
         if not video_response.get('items'):
             return "Video not found (may be deleted, private, or region-restricted)."
@@ -112,7 +114,7 @@ async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments
 
         proxy_url = get_random_proxy()
         if proxy_url:
-            logging.info("Using proxy for YouTube Transcript API: %s", proxy_url)
+            logger.info("Using proxy for YouTube Transcript API: %s", proxy_url)
             transcripts = YouTubeTranscriptApi.list_transcripts(
                 video_id,
                 proxies={"https": proxy_url}
@@ -167,9 +169,9 @@ async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments
         return content
 
     except HttpError as http_err:
-        logging.exception("HttpError while trying to fetch YouTube data.")
+        logger.exception("HttpError while trying to fetch YouTube data.")
         return f"Error fetching YouTube content (HTTP error): {http_err}"
 
     except Exception as e:
-        logging.exception("General error while fetching YouTube content.")
+        logger.exception("General error while fetching YouTube content.")
         return f"Error fetching YouTube content: {e}"

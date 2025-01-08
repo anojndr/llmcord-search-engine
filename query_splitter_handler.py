@@ -4,6 +4,9 @@ import re
 
 from openai import AsyncOpenAI
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
+
 async def split_query(query, cfg, api_key_manager):
     query_splitter_prompt = '''Your task is to determine if the query implies a comparison between multiple entities.
 
@@ -65,7 +68,7 @@ Output:
         extra_body=cfg.get("query_splitter_extra_api_parameters", {})
     )
 
-    logging.info(f"Payload being sent to LLM API for query_splitter:\n{json.dumps(kwargs, indent=2, default=str)}")
+    logger.info(f"Payload being sent to LLM API for query_splitter:\n{json.dumps(kwargs, indent=2, default=str)}")
 
     try:
         response = await query_splitter_openai_client.chat.completions.create(**kwargs)
@@ -78,14 +81,14 @@ Output:
                 if isinstance(queries, list) and all(isinstance(q, str) for q in queries):
                     return queries
                 else:
-                    logging.warning("Invalid JSON array format in query_splitter response.")
+                    logger.warning("Invalid JSON array format in query_splitter response.")
                     return [query]
             else:
-                logging.warning("No JSON array found in query_splitter response.")
+                logger.warning("No JSON array found in query_splitter response.")
                 return [query]
         except json.JSONDecodeError:
-            logging.warning("Failed to parse JSON in query_splitter response.")
+            logger.warning("Failed to parse JSON in query_splitter response.")
             return [query]
     except Exception as e:
-        logging.exception("Error while calling query_splitter model")
+        logger.exception("Error while calling query_splitter model")
         return [query]

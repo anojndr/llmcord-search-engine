@@ -1,5 +1,9 @@
 from flask import Flask, jsonify
 from threading import Thread
+import logging
+
+werkzeug_log = logging.getLogger('werkzeug')
+werkzeug_log.setLevel(logging.ERROR)
 
 app = Flask(__name__)
 

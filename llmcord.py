@@ -26,12 +26,13 @@ import io
 from api_key_manager import APIKeyManager
 
 from keep_alive import keep_alive
-keep_alive()
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
 )
+
+keep_alive()
 
 VISION_MODEL_TAGS = (
     "gpt-4o",
@@ -54,7 +55,6 @@ EDIT_DELAY_SECONDS = 1
 
 MAX_MESSAGE_NODES = 100
 
-
 def get_config(filename="config.yaml"):
     """
     Attempts to load config.yaml first from the current directory,
@@ -72,7 +72,6 @@ def get_config(filename="config.yaml"):
     raise FileNotFoundError(
         f"config.yaml not found in current directory or at {alt_filename}"
     )
-
 
 cfg = get_config()
 api_key_manager = APIKeyManager(cfg)
@@ -94,7 +93,6 @@ httpx_client = httpx.AsyncClient()
 msg_nodes = {}
 last_task_time = None
 
-
 @dataclass
 class MsgNode:
     text: Optional[str] = None
@@ -114,7 +112,6 @@ class MsgNode:
 
     internet_used: bool = False
 
-
 class OutputView(View):
     def __init__(self, contents):
         super().__init__()
@@ -131,7 +128,6 @@ class OutputView(View):
         )
         button.disabled = True
         await interaction.message.edit(view=self)
-
 
 @discord_client.event
 async def on_message(new_msg):
@@ -652,12 +648,10 @@ async def on_message(new_msg):
         await progress_message.edit(content="An error occurred while processing your request.", allowed_mentions=allowed_mentions)
         return
 
-
 async def main():
     try:
         await discord_client.start(cfg["bot_token"])
     finally:
         await httpx_client.aclose()
-
 
 asyncio.run(main())
