@@ -17,6 +17,7 @@ from url_handler import extract_urls_from_text, fetch_urls_content
 from rephraser_handler import rephrase_query
 from query_splitter_handler import split_query
 from google_lens_handler import get_google_lens_results, process_google_lens_results
+from image_handler import fetch_images_from_serper
 
 from discord.ui import View, Button
 from discord import File
@@ -171,16 +172,33 @@ class MsgNode:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     serper_queries: Optional[list] = None
+    image_files: Optional[list] = None
+    image_urls: Optional[list] = None
 
     internet_used: bool = False
 
 class OutputView(View):
-    def __init__(self, contents):
+    def __init__(self, contents, query, serper_queries=None, image_files=None, image_urls=None):
         super().__init__()
         self.contents = contents
+        self.query = query
+        self.serper_queries = serper_queries
+        self.image_files = image_files or []
+        self.image_urls = image_urls or []
 
-    @discord.ui.button(label="Get Output as Text File", style=discord.ButtonStyle.primary)
-    async def send_text_file(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.add_item(Button(label="Get Output as Text File", style=discord.ButtonStyle.primary, custom_id="text_file"))
+
+        if self.image_files or self.image_urls:
+            self.add_item(Button(label="Show Images", style=discord.ButtonStyle.secondary, custom_id="show_images"))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.data["custom_id"] == "text_file":
+            await self.send_text_file(interaction)
+        elif interaction.data["custom_id"] == "show_images":
+            await self.show_images(interaction)
+        return True
+
+    async def send_text_file(self, interaction: discord.Interaction):
         full_content = "".join(self.contents)
         file = io.StringIO(full_content)
         await interaction.response.send_message(
@@ -188,7 +206,28 @@ class OutputView(View):
             file=File(file, filename="output.txt"),
             ephemeral=True
         )
-        button.disabled = True
+        for item in self.children:
+            if item.custom_id == "text_file":
+                item.disabled = True
+        await interaction.message.edit(view=self)
+
+    async def show_images(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        if not self.image_files and not self.image_urls:
+            await interaction.followup.send("No images found.")
+            return
+
+        message_content = "Here are the images:"
+        if self.image_urls:
+            message_content += "\n\nFailed to download the following images (sent as URLs):\n" + "\n".join(self.image_urls)
+
+        await interaction.followup.send(
+            content=message_content,
+            files=self.image_files
+        )
+        for item in self.children:
+            if item.custom_id == "show_images":
+                item.disabled = True
         await interaction.message.edit(view=self)
 
 @discord_client.event
@@ -517,6 +556,14 @@ async def on_message(new_msg):
 
                     augmented_user_message = new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
 
+                    if split_queries and len(split_queries) > 1:
+                        image_files, image_urls = await fetch_images_from_serper(split_queries, 1, api_key_manager, httpx_client)
+                    else:
+                        image_files, image_urls = await fetch_images_from_serper([latest_user_query], 3, api_key_manager, httpx_client)
+
+                    msg_nodes[new_msg.id].image_files = image_files
+                    msg_nodes[new_msg.id].image_urls = image_urls
+
             if augmented_user_message:
                 for message in reversed(messages):
                     if message['role'] == 'user':
@@ -597,7 +644,7 @@ async def on_message(new_msg):
                             )
                             embed.set_footer(text=footer_text)
 
-                            view = OutputView(response_contents)
+                            view = OutputView(response_contents, user_message_content, serper_queries, msg_nodes[new_msg.id].image_files, msg_nodes[new_msg.id].image_urls)
 
                             if response_msgs == []:
                                 response_msg = await progress_message.edit(
@@ -674,7 +721,7 @@ async def on_message(new_msg):
                 prev_chunk = curr_chunk
 
             if use_plain_responses:
-                view = OutputView(response_contents)
+                view = OutputView(response_contents, user_message_content, serper_queries, msg_nodes[new_msg.id].image_files, msg_nodes[new_msg.id].image_urls)
 
                 for content in response_contents:
                     if response_msgs == []:
