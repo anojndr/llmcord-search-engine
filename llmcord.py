@@ -177,26 +177,26 @@ class MsgNode:
 
     internet_used: bool = False
 
-class OutputView(View):
+class OutputView(discord.ui.View):
     def __init__(self, contents, query, serper_queries=None, image_files=None, image_urls=None):
-        super().__init__()
+        super().__init__(timeout=None)
         self.contents = contents
         self.query = query
         self.serper_queries = serper_queries
         self.image_files = image_files or []
         self.image_urls = image_urls or []
 
-        self.add_item(Button(label="Get Output as Text File", style=discord.ButtonStyle.primary, custom_id="text_file"))
+    @discord.ui.button(label="Get Output as Text File", style=discord.ButtonStyle.primary, custom_id="text_file")
+    async def text_file_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.send_text_file(interaction)
+        button.disabled = True
+        await interaction.message.edit(view=self)
 
-        if self.image_files or self.image_urls:
-            self.add_item(Button(label="Show Images", style=discord.ButtonStyle.secondary, custom_id="show_images"))
-
-    async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.data["custom_id"] == "text_file":
-            await self.send_text_file(interaction)
-        elif interaction.data["custom_id"] == "show_images":
-            await self.show_images(interaction)
-        return True
+    @discord.ui.button(label="Show Images", style=discord.ButtonStyle.secondary, custom_id="show_images")
+    async def show_images_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.show_images(interaction)
+        button.disabled = True
+        await interaction.message.edit(view=self)
 
     async def send_text_file(self, interaction: discord.Interaction):
         full_content = "".join(self.contents)
@@ -206,10 +206,6 @@ class OutputView(View):
             file=File(file, filename="output.txt"),
             ephemeral=True
         )
-        for item in self.children:
-            if item.custom_id == "text_file":
-                item.disabled = True
-        await interaction.message.edit(view=self)
 
     async def show_images(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -225,10 +221,6 @@ class OutputView(View):
             content=message_content,
             files=self.image_files
         )
-        for item in self.children:
-            if item.custom_id == "show_images":
-                item.disabled = True
-        await interaction.message.edit(view=self)
 
 @discord_client.event
 async def on_message(new_msg):
