@@ -19,7 +19,7 @@ from query_splitter_handler import split_query
 from google_lens_handler import get_google_lens_results, process_google_lens_results
 from image_handler import fetch_images_from_serper
 
-from discord.ui import View, Button
+from discord.ui import View, Button, TextInput
 from discord import File
 import io
 
@@ -56,6 +56,161 @@ EDIT_DELAY_SECONDS = 1
 MAX_MESSAGE_NODES = 100
 
 load_dotenv()
+
+class ImageCountModal(discord.ui.Modal, title="Select Number of Images"):
+    def __init__(self, parent_view):
+        super().__init__()
+        self.parent_view = parent_view
+        
+        self.image_count = TextInput(
+            label="Number of images per query",
+            placeholder="Enter a number between 1 and 5",
+            default="1",
+            min_length=1,
+            max_length=1,
+            required=True
+        )
+        self.add_item(self.image_count)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            count = int(self.image_count.value)
+            if 1 <= count <= 5:
+                await self.parent_view.show_images(interaction, count)
+            else:
+                await interaction.response.send_message(
+                    "Please enter a number between 1 and 5.",
+                    ephemeral=True
+                )
+        except ValueError:
+            await interaction.response.send_message(
+                "Please enter a valid number between 1 and 5.",
+                ephemeral=True
+            )
+
+class OutputView(discord.ui.View):
+    def __init__(self, contents, query, serper_queries=None, image_files=None, image_urls=None):
+        super().__init__(timeout=None)
+        self.contents = contents
+        self.query = query
+        self.serper_queries = serper_queries
+        
+        if isinstance(image_files, dict):
+            self.image_files = image_files
+        else:
+            self.image_files = {query: image_files} if image_files else {}
+            
+        if isinstance(image_urls, dict):
+            self.image_urls = image_urls
+        else:
+            self.image_urls = {query: image_urls} if image_urls else {}
+
+        self.add_text_file_button()
+        if self.serper_queries is not None:
+            self.add_show_images_button()
+
+    def add_text_file_button(self):
+        text_file_button = Button(
+            label="Get Output as Text File",
+            style=discord.ButtonStyle.primary,
+            custom_id="text_file"
+        )
+        text_file_button.callback = self.text_file_button_callback
+        self.add_item(text_file_button)
+
+    def add_show_images_button(self):
+        show_images_button = Button(
+            label="Show Images",
+            style=discord.ButtonStyle.secondary,
+            custom_id="show_images"
+        )
+        show_images_button.callback = self.show_images_button_callback
+        self.add_item(show_images_button)
+
+    async def text_file_button_callback(self, interaction: discord.Interaction):
+        await self.send_text_file(interaction)
+        for item in self.children:
+            if item.custom_id == "text_file":
+                item.disabled = True
+                break
+        await interaction.message.edit(view=self)
+
+    async def show_images_button_callback(self, interaction: discord.Interaction):
+        total_images = sum(len(files) for files in self.image_files.values()) + \
+                      sum(len(urls) for urls in self.image_urls.values())
+                      
+        if total_images == 0:
+            await interaction.response.send_message("No images found.", ephemeral=True)
+            return
+
+        modal = ImageCountModal(self)
+        await interaction.response.send_modal(modal)
+        for item in self.children:
+            if item.custom_id == "show_images":
+                item.disabled = True
+                break
+        await interaction.message.edit(view=self)
+
+    async def send_text_file(self, interaction: discord.Interaction):
+        full_content = "".join(self.contents)
+        file = io.StringIO(full_content)
+        await interaction.response.send_message(
+            content="Here is the output as a text file:",
+            file=File(file, filename="output.txt"),
+            ephemeral=True
+        )
+
+    async def show_images(self, interaction: discord.Interaction, selected_count: int):
+        await interaction.response.defer()
+
+        if len(self.image_files) == 1 and not self.serper_queries:
+            query = next(iter(self.image_files))
+            files = self.image_files[query][:selected_count] if self.image_files[query] else []
+            urls = self.image_urls[query][:selected_count] if query in self.image_urls else []
+
+            if not files and not urls:
+                await interaction.followup.send("No images available.", ephemeral=True)
+                return
+
+            message_content = f"Here are {len(files) + len(urls)} images:"
+            if urls:
+                message_content += "\n\nFailed to download the following images (sent as URLs):\n" + "\n".join(urls)
+
+            await interaction.followup.send(content=message_content, files=files)
+        else:
+            for i, query in enumerate(self.image_files.keys(), 1):
+                files = self.image_files[query][:selected_count] if query in self.image_files else []
+                urls = self.image_urls[query][:selected_count] if query in self.image_urls else []
+
+                if not files and not urls:
+                    continue
+
+                message_content = f"Images for query {i}: '{query}' ({len(files) + len(urls)} images)"
+                if urls:
+                    message_content += "\n\nFailed to download the following images (sent as URLs):\n" + "\n".join(urls)
+
+                await interaction.followup.send(content=message_content, files=files)
+
+@dataclass
+class MsgNode:
+    text: Optional[str] = None
+    images: list = field(default_factory=list)
+
+    role: Literal["user", "assistant"] = "assistant"
+    user_id: Optional[int] = None
+
+    next_msg: Optional[discord.Message] = None
+
+    has_bad_attachments: bool = False
+    fetch_next_failed: bool = False
+
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    serper_queries: Optional[list] = None
+    image_files: Optional[list] = None
+    image_urls: Optional[list] = None
+
+    internet_used: bool = False
 
 def get_config():
     config = {
@@ -155,72 +310,6 @@ httpx_client = httpx.AsyncClient()
 
 msg_nodes = {}
 last_task_time = None
-
-@dataclass
-class MsgNode:
-    text: Optional[str] = None
-    images: list = field(default_factory=list)
-
-    role: Literal["user", "assistant"] = "assistant"
-    user_id: Optional[int] = None
-
-    next_msg: Optional[discord.Message] = None
-
-    has_bad_attachments: bool = False
-    fetch_next_failed: bool = False
-
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-
-    serper_queries: Optional[list] = None
-    image_files: Optional[list] = None
-    image_urls: Optional[list] = None
-
-    internet_used: bool = False
-
-class OutputView(discord.ui.View):
-    def __init__(self, contents, query, serper_queries=None, image_files=None, image_urls=None):
-        super().__init__(timeout=None)
-        self.contents = contents
-        self.query = query
-        self.serper_queries = serper_queries
-        self.image_files = image_files or []
-        self.image_urls = image_urls or []
-
-    @discord.ui.button(label="Get Output as Text File", style=discord.ButtonStyle.primary, custom_id="text_file")
-    async def text_file_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.send_text_file(interaction)
-        button.disabled = True
-        await interaction.message.edit(view=self)
-
-    @discord.ui.button(label="Show Images", style=discord.ButtonStyle.secondary, custom_id="show_images")
-    async def show_images_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.show_images(interaction)
-        button.disabled = True
-        await interaction.message.edit(view=self)
-
-    async def send_text_file(self, interaction: discord.Interaction):
-        full_content = "".join(self.contents)
-        file = io.StringIO(full_content)
-        await interaction.response.send_message(
-            content="Here is the output as a text file:",
-            file=File(file, filename="output.txt"),
-            ephemeral=True
-        )
-
-    async def show_images(self, interaction: discord.Interaction):
-        await interaction.response.defer()
-        if not self.image_files and not self.image_urls:
-            await interaction.followup.send("No images found.")
-            return
-
-        message_content = "Here are the images:"
-        if self.image_urls:
-            message_content += "\n\nFailed to download the following images (sent as URLs):\n" + "\n".join(self.image_urls)
-
-        await interaction.followup.send(
-            content=message_content,
-            files=self.image_files
-        )
 
 @discord_client.event
 async def on_message(new_msg):
@@ -548,13 +637,21 @@ async def on_message(new_msg):
 
                     augmented_user_message = new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
 
-                    if split_queries and len(split_queries) > 1:
-                        image_files, image_urls = await fetch_images_from_serper(split_queries, 1, api_key_manager, httpx_client)
-                    else:
-                        image_files, image_urls = await fetch_images_from_serper([latest_user_query], 3, api_key_manager, httpx_client)
+                    if split_queries:
+                        image_files_dict = {}
+                        image_urls_dict = {}
+                        
+                        for query in split_queries:
+                            files, urls = await fetch_images_from_serper([query], 5, api_key_manager, httpx_client)
+                            image_files_dict[query] = files
+                            image_urls_dict[query] = urls
 
-                    msg_nodes[new_msg.id].image_files = image_files
-                    msg_nodes[new_msg.id].image_urls = image_urls
+                        msg_nodes[new_msg.id].image_files = image_files_dict
+                        msg_nodes[new_msg.id].image_urls = image_urls_dict
+                    else:
+                        files, urls = await fetch_images_from_serper([latest_user_query], 5, api_key_manager, httpx_client)
+                        msg_nodes[new_msg.id].image_files = {latest_user_query: files}
+                        msg_nodes[new_msg.id].image_urls = {latest_user_query: urls}
 
             if augmented_user_message:
                 for message in reversed(messages):

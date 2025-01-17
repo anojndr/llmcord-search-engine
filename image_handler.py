@@ -38,7 +38,7 @@ async def fetch_images_from_serper(queries, num_images, api_key_manager, httpx_c
         }
         data = {
             'q': query,
-            'num': num_images,
+            'num': num_images * 2,
             'type': 'images'
         }
 
@@ -48,22 +48,30 @@ async def fetch_images_from_serper(queries, num_images, api_key_manager, httpx_c
             data = response.json()
 
             image_tasks = []
-            for image in data.get('images', [])[:num_images]:
+            for image in data.get('images', [])[:num_images * 2]:
                 image_url = image['imageUrl']
                 image_tasks.append(download_image(image_url, httpx_client))
 
             downloaded_images = await asyncio.gather(*image_tasks, return_exceptions=True)
 
+            successful_downloads = 0
             for idx, image_data in enumerate(downloaded_images):
                 if isinstance(image_data, Exception):
                     logger.error(f"Error downloading image: {image_data}")
-                    image_urls.append(data['images'][idx]['imageUrl'])
+                    if successful_downloads < num_images:
+                        image_urls.append(data['images'][idx]['imageUrl'])
                 elif image_data:
-                    image_file = File(BytesIO(image_data), filename=f"image_{len(image_files) + 1}.png")
-                    image_files.append(image_file)
+                    if successful_downloads < num_images:
+                        image_file = File(BytesIO(image_data), filename=f"image_{len(image_files) + 1}.png")
+                        image_files.append(image_file)
+                        successful_downloads += 1
+                
+                if successful_downloads >= num_images:
+                    break
 
         except Exception as e:
             logger.error(f"Error fetching images for query {query}: {e}")
+
     return image_files, image_urls
 
 async def download_image(image_url, httpx_client):
