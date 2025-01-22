@@ -635,7 +635,7 @@ async def on_message(new_msg):
                     for idx, (query, result) in enumerate(zip(split_queries, search_results_list), start=1):
                         search_results += f"Results for query {idx} ('{query}'):\n{result}\n\n"
 
-                    augmented_user_message = new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
+                    augmented_user_message = "QUERY:" + new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
 
                     if split_queries:
                         image_files_dict = {}
