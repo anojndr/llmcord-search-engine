@@ -10,19 +10,7 @@ logger.setLevel(logging.DEBUG)
 
 async def fetch_images_from_serper(queries, num_images, api_key_manager, httpx_client):
     """
-    Fetches images from Serper API based on the provided queries and returns them as Discord File attachments or URLs.
-    Ensures all images are processed before returning.
-
-    Args:
-        queries (list): List of search queries.
-        num_images (int): Number of images to fetch per query.
-        api_key_manager (APIKeyManager): Instance of APIKeyManager to fetch Serper API keys.
-        httpx_client: Async HTTP client for making requests.
-
-    Returns:
-        tuple: A tuple containing:
-            - List of Discord File objects (successfully downloaded images).
-            - List of image URLs (failed downloads).
+    Fetches images from Serper API using GET requests with query parameters
     """
     image_files = []
     image_urls = []
@@ -32,18 +20,16 @@ async def fetch_images_from_serper(queries, num_images, api_key_manager, httpx_c
             logger.warning("No Serper API key available.")
             continue
 
-        headers = {
-            'Content-Type': 'application/json',
-            'X-API-KEY': api_key
-        }
-        data = {
+        params = {
             'q': query,
             'num': num_images * 2,
-            'type': 'images'
+            'type': 'images',
+            'autocorrect': 'false',
+            'apiKey': api_key
         }
 
         try:
-            response = await httpx_client.post('https://google.serper.dev/images', json=data, headers=headers)
+            response = await httpx_client.get('https://google.serper.dev/images', params=params)
             response.raise_for_status()
             data = response.json()
 

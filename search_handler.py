@@ -12,17 +12,15 @@ async def handle_search_query(query, api_key_manager, httpx_client, config=None)
     if not api_key:
         return "No Serper API key available."
 
-    headers = {
-        'Content-Type': 'application/json',
-        'X-API-KEY': api_key
-    }
-    data = {
+    params = {
         'q': query,
-        'num': max_urls
+        'num': max_urls,
+        'autocorrect': 'false',
+        'apiKey': api_key
     }
 
     try:
-        response = await httpx_client.post('https://google.serper.dev/search', json=data, headers=headers)
+        response = await httpx_client.get('https://google.serper.dev/search', params=params)
         response.raise_for_status()
         data = response.json()
     except Exception as e:
