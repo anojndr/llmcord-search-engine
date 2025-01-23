@@ -27,7 +27,14 @@ async def handle_search_query(query, api_key_manager, httpx_client, config=None)
             'https://google.serper.dev/search', 
             params=serper_params
         )
-        serper_response.raise_for_status()
+        
+        if serper_response.status_code >= 400:
+            raise httpx.HTTPStatusError(
+                message=f"Bad status code: {serper_response.status_code}",
+                request=serper_response.request,
+                response=serper_response
+            )
+
         data = serper_response.json()
 
     except Exception as serper_error:
@@ -49,11 +56,18 @@ async def handle_search_query(query, api_key_manager, httpx_client, config=None)
             }
 
             bing_response = await httpx_client.get(
-                f"{bing_endpoint}/bing/v7.0/search",
+                f"{bing_endpoint.rstrip('/')}/v7.0/search",
                 headers=headers,
                 params=bing_params
             )
-            bing_response.raise_for_status()
+            
+            if bing_response.status_code >= 400:
+                raise httpx.HTTPStatusError(
+                    message=f"Bing error: {bing_response.status_code}",
+                    request=bing_response.request,
+                    response=bing_response
+                )
+
             data = bing_response.json()
 
         except Exception as bing_error:
