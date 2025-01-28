@@ -2,6 +2,7 @@ import httpx
 import logging
 import random
 import os
+import html
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -17,7 +18,7 @@ def _find_proxies_file(filename="proxies.txt"):
     if os.path.exists(alt_filename):
         return alt_filename
     return None
-
+    
 def load_proxies(filename="proxies.txt"):
     """
     Loads proxies from the specified file. Each line can be a simple URL or include user:pass.
@@ -44,16 +45,17 @@ def load_proxies(filename="proxies.txt"):
                         proxies.append(proxy_url)
                     else:
                         proxies.append(line)
-
     else:
         logger.warning("No proxies file found.")
     return proxies
 
-def get_random_proxy(proxies_list):
+def get_random_proxy(proxies_list=None):
     """
     Randomly select a proxy URL string from proxies_list.
     Returns None if proxies_list is empty.
     """
+    if proxies_list is None:
+        proxies_list = load_proxies()
     if not proxies_list:
         return None
     return random.choice(proxies_list)
@@ -61,13 +63,19 @@ def get_random_proxy(proxies_list):
 def _parse_comment_tree(children, comment_list):
     """
     Recursively traverse Reddit 't1' comments, appending each comment's body to comment_list.
+    Returns XML-structured comment data.
     """
     for child in children:
         if child.get('kind') == 't1':
             data = child.get('data', {})
-            body = data.get('body', '')
-            if body:
-                comment_list.append(body)
+            comment_data = {
+                'body': html.escape(data.get('body', '')),
+                'author': html.escape(data.get('author', '[deleted]')),
+                'score': data.get('score', 0),
+                'created_utc': data.get('created_utc', 0)
+            }
+            if comment_data['body']:
+                comment_list.append(comment_data)
             replies = data.get('replies')
             if isinstance(replies, dict):
                 new_children = replies.get('data', {}).get('children', [])
@@ -76,7 +84,7 @@ def _parse_comment_tree(children, comment_list):
 async def fetch_reddit_content(url, api_key_manager, httpx_client=None, retries=3):
     """
     Fetches Reddit submission + comments by appending .json to the final redirect URL
-    and parsing the returned JSON structure (which typically consists of two listings).
+    and parsing the returned JSON structure. Returns content in XML format.
     Uses a random proxy from proxies.txt for each request.
     """
     proxies = load_proxies()
@@ -107,16 +115,22 @@ async def fetch_reddit_content(url, api_key_manager, httpx_client=None, retries=
         data = json_response.json()
 
         if not isinstance(data, list) or len(data) < 1:
-            return "No valid data received from Reddit."
+            return "<reddit_response><error>No valid data received from Reddit.</error></reddit_response>"
 
         first_listing = data[0]
         submission_children = first_listing.get('data', {}).get('children', [])
         if not submission_children:
-            return "No submission data found."
+            return "<reddit_response><error>No submission data found.</error></reddit_response>"
 
         submission_data = submission_children[0].get('data', {})
-        title = submission_data.get('title', '')
-        selftext = submission_data.get('selftext', '')
+        title = html.escape(submission_data.get('title', ''))
+        selftext = html.escape(submission_data.get('selftext', ''))
+        author = html.escape(submission_data.get('author', '[deleted]'))
+        score = submission_data.get('score', 0)
+        upvote_ratio = submission_data.get('upvote_ratio', 0)
+        created_utc = submission_data.get('created_utc', 0)
+        num_comments = submission_data.get('num_comments', 0)
+        subreddit = html.escape(submission_data.get('subreddit', ''))
 
         comments_list = []
         if len(data) > 1:
@@ -124,11 +138,36 @@ async def fetch_reddit_content(url, api_key_manager, httpx_client=None, retries=
             comments_children = second_listing.get('data', {}).get('children', [])
             _parse_comment_tree(comments_children, comments_list)
 
-        content = f"Title: {title}\n\nSelftext:\n{selftext}\n\nComments:\n"
-        for idx, comment in enumerate(comments_list, start=1):
-            content += f"{idx}. {comment}\n"
+        content = [
+            '<reddit_response>',
+            '<post>',
+            f'<metadata>',
+            f'<subreddit>{subreddit}</subreddit>',
+            f'<author>{author}</author>',
+            f'<created_utc>{created_utc}</created_utc>',
+            f'<score>{score}</score>',
+            f'<upvote_ratio>{upvote_ratio}</upvote_ratio>',
+            f'<num_comments>{num_comments}</num_comments>',
+            '</metadata>',
+            f'<title>{title}</title>',
+            f'<selftext>{selftext}</selftext>',
+            '</post>',
+            '<comments>'
+        ]
+        
+        for comment in comments_list:
+            content.extend([
+                '<comment>',
+                f'<author>{comment["author"]}</author>',
+                f'<score>{comment["score"]}</score>',
+                f'<created_utc>{comment["created_utc"]}</created_utc>',
+                f'<body>{comment["body"]}</body>',
+                '</comment>'
+            ])
+        
+        content.extend(['</comments>', '</reddit_response>'])
 
-        return content.strip() or "No content found."
+        return '\n'.join(content)
 
     except (httpx.ProxyError, httpx.ConnectError, httpx.ReadError, httpx.ReadTimeout, httpx.ConnectTimeout) as e:
         logger.warning("Proxy or connection error: %s", e)
@@ -138,7 +177,8 @@ async def fetch_reddit_content(url, api_key_manager, httpx_client=None, retries=
                 await httpx_client.aclose()
             return await fetch_reddit_content(url, api_key_manager, None, retries - 1)
         else:
-            return f"Error fetching Reddit content after multiple retries: {e}"
+            return f'<reddit_response><error>Error fetching Reddit content after multiple retries: {str(e)}</error></reddit_response>'
 
     except Exception as e:
-        return f"Error fetching Reddit content: {e}"
+        logger.error("Error fetching Reddit content: %s", str(e))
+        return f'<reddit_response><error>Error fetching Reddit content: {str(e)}</error></reddit_response>'

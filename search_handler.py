@@ -2,8 +2,16 @@ import asyncio
 import os
 import httpx
 from url_handler import fetch_urls_content
+import logging
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 async def handle_search_query(query, api_key_manager, httpx_client, config=None):
+    """
+    Handle search queries using Serper API with fallback to Bing API.
+    Returns results in structured XML format.
+    """
     if config is None:
         config = {}
 
@@ -23,6 +31,7 @@ async def handle_search_query(query, api_key_manager, httpx_client, config=None)
             'apiKey': serper_api_key
         }
 
+        logger.info(f"Querying Serper API with params: {serper_params}")
         serper_response = await httpx_client.get(
             'https://google.serper.dev/search', 
             params=serper_params
@@ -36,9 +45,11 @@ async def handle_search_query(query, api_key_manager, httpx_client, config=None)
             )
 
         data = serper_response.json()
+        logger.info("Successfully received Serper API response")
 
     except Exception as serper_error:
-        error_messages.append(f"Serper error: {str(serper_error)}")
+        logger.warning(f"Serper API error: {serper_error}")
+        error_messages.append(f'<search_error type="serper">{str(serper_error)}</search_error>')
         
         try:
             bing_subscription_key = os.getenv('BING_SEARCH_V7_SUBSCRIPTION_KEY')
@@ -55,6 +66,7 @@ async def handle_search_query(query, api_key_manager, httpx_client, config=None)
                 'responseFilter': 'Webpages'
             }
 
+            logger.info("Attempting Bing API fallback")
             bing_response = await httpx_client.get(
                 f"{bing_endpoint.rstrip('/')}/v7.0/search",
                 headers=headers,
@@ -69,37 +81,59 @@ async def handle_search_query(query, api_key_manager, httpx_client, config=None)
                 )
 
             data = bing_response.json()
+            logger.info("Successfully received Bing API response")
 
         except Exception as bing_error:
-            error_messages.append(f"Bing fallback error: {str(bing_error)}")
-            return "\n".join(error_messages)
+            logger.error(f"Bing API error: {bing_error}")
+            error_messages.append(f'<search_error type="bing">{str(bing_error)}</search_error>')
+            return "<search_results>\n" + "\n".join(error_messages) + "\n</search_results>"
 
     urls = []
     if not data:
-        return "No search results available from either provider"
+        return '<search_results><search_error>No search results available from either provider</search_error></search_results>'
 
     if 'organic' in data:
         for result in data.get('organic', []):
             if 'link' in result:
-                urls.append(result['link'])
+                urls.append({
+                    'url': result['link'],
+                    'title': result.get('title', 'No title'),
+                    'snippet': result.get('snippet', 'No snippet')
+                })
                 if len(urls) >= max_urls:
                     break
 
     elif 'webPages' in data:
         for page in data.get('webPages', {}).get('value', []):
             if 'url' in page:
-                urls.append(page['url'])
+                urls.append({
+                    'url': page['url'],
+                    'title': page.get('name', 'No title'),
+                    'snippet': page.get('snippet', 'No snippet')
+                })
                 if len(urls) >= max_urls:
                     break
 
     if not urls:
-        return "No valid URLs found in search results"
+        return '<search_results><search_error>No valid URLs found in search results</search_error></search_results>'
 
-    contents = await fetch_urls_content(urls, api_key_manager, httpx_client, config=config)
+    url_list = [url_data['url'] for url_data in urls]
+    contents = await fetch_urls_content(url_list, api_key_manager, httpx_client, config=config)
 
-    results = []
-    for idx, (url, content) in enumerate(zip(urls, contents), start=1):
-        results.append(f'url {idx}: "{url}"')
-        results.append(f'url {idx} content: "{content}"\n')
+    results = ['<search_results>']
+    results.extend(error_messages)
+    
+    for idx, ((url_data, content)) in enumerate(zip(urls, contents), start=1):
+        results.append(
+            f'<search_result id="{idx}">\n'
+            f'<metadata>\n'
+            f'<url>{url_data["url"]}</url>\n'
+            f'<title>{url_data["title"]}</title>\n'
+            f'<snippet>{url_data["snippet"]}</snippet>\n'
+            f'</metadata>\n'
+            f'<content>{content}</content>\n'
+            f'</search_result>'
+        )
 
+    results.append('</search_results>')
     return "\n".join(results)

@@ -11,6 +11,7 @@ import discord
 import httpx
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
+import html
 
 from search_handler import handle_search_query
 from url_handler import extract_urls_from_text, fetch_urls_content
@@ -411,13 +412,14 @@ async def on_message(new_msg):
                     }
 
                     curr_node.text = "\n".join(
-                        ([curr_msg.content] if curr_msg.content else [])
-                        + [embed.description for embed in curr_msg.embeds if embed.description]
-                        + [
-                            (await httpx_client.get(att.url)).text
+                        ([curr_msg.content] if curr_msg.content else []) +
+                        [embed.description for embed in curr_msg.embeds if embed.description] +
+                        [
+                            f'<text_file name="{html.escape(att.filename)}">\n{html.escape((await httpx_client.get(att.url)).text)}\n</text_file>'
                             for att in good_attachments["text"]
                         ]
                     )
+
                     if curr_node.text.startswith(discord_client.user.mention):
                         curr_node.text = curr_node.text.replace(
                             discord_client.user.mention, "", 1
@@ -590,7 +592,10 @@ async def on_message(new_msg):
 
             formatted_lens_results = await process_google_lens_results(lens_results, cfg, api_key_manager, httpx_client)
 
-            augmented_user_message = user_message_content + "\n\nRespond to my query based on the google lens results:\n" + formatted_lens_results
+            augmented_user_message = (
+                f'<user_query>\n{html.escape(user_message_content)}\n</user_query>\n\n'
+                f'<lens_results>\n{formatted_lens_results}\n</lens_results>'
+            )
 
             for message in reversed(messages):
                 if message['role'] == 'user':
@@ -614,12 +619,17 @@ async def on_message(new_msg):
             if urls_in_message:
                 contents = await fetch_urls_content(urls_in_message, api_key_manager, httpx_client, config=cfg)
                 augmented_user_message = (
-                    new_msg.content + "\n\nRespond to my query based on the url content/s:\n"
+                    f'<user_query>\n{html.escape(new_msg.content)}\n</user_query>\n\n'
+                    f'<url_results>\n'
                 )
                 for idx, (url, content) in enumerate(zip(urls_in_message, contents), start=1):
                     augmented_user_message += (
-                        f"url {idx}:\n{url}\nurl {idx} content:\n{content}\n\n"
+                        f'<url_result id="{idx}">\n'
+                        f'<url>{html.escape(url)}</url>\n'
+                        f'<content>{content}</content>\n'
+                        f'</url_result>\n'
                     )
+                augmented_user_message += '</url_results>'
                 is_url_query = True
 
             if not is_url_query:
@@ -638,11 +648,20 @@ async def on_message(new_msg):
                         *[handle_search_query(q, api_key_manager, httpx_client, config=cfg) for q in split_queries]
                     )
 
-                    search_results = ""
+                    search_results = (
+                        f'<user_query>\n{html.escape(new_msg.content)}\n</user_query>\n\n'
+                        f'<search_results_by_query>\n'
+                    )
                     for idx, (query, result) in enumerate(zip(split_queries, search_results_list), start=1):
-                        search_results += f"Results for query {idx} ('{query}'):\n{result}\n\n"
+                        search_results += (
+                            f'<query_result id="{idx}">\n'
+                            f'<query>{html.escape(query)}</query>\n'
+                            f'<results>{result}</results>\n'
+                            f'</query_result>\n'
+                        )
+                    search_results += '</search_results_by_query>'
 
-                    augmented_user_message = "QUERY:" + new_msg.content + "\n\nRespond to my query based on the search results:\n" + search_results
+                    augmented_user_message = search_results
 
                     if split_queries:
                         image_files_dict = {}
