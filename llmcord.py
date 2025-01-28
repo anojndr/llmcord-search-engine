@@ -273,15 +273,18 @@ def get_config():
         },
         "model": os.getenv("MODEL", "openai/gpt-4o"),
         "extra_api_parameters": {
-            "temperature": float(os.getenv("EXTRA_API_PARAMETERS_TEMPERATURE", "1.0")),
+            "temperature": float(os.getenv("EXTRA_API_PARAMETERS_TEMPERATURE", "1")),
+            "top_p": float(os.getenv("EXTRA_API_PARAMETERS_TOP_P", "1")),
         },
         "rephraser_model": os.getenv("REPHRASER_MODEL", "openai/gpt-4o-mini"),
         "rephraser_extra_api_parameters": {
-            "temperature": float(os.getenv("REPHRASER_EXTRA_API_PARAMETERS_TEMPERATURE", "0.7")),
+            "temperature": float(os.getenv("REPHRASER_EXTRA_API_PARAMETERS_TEMPERATURE", "1")),
+            "top_p": float(os.getenv("REPHRASER_EXTRA_API_PARAMETERS_TOP_P", "1")),
         },
         "query_splitter_model": os.getenv("QUERY_SPLITTER_MODEL", "openai/gpt-4o-mini"),
         "query_splitter_extra_api_parameters": {
-            "temperature": float(os.getenv("QUERY_SPLITTER_EXTRA_API_PARAMETERS_TEMPERATURE", "0.5")),
+            "temperature": float(os.getenv("QUERY_SPLITTER_EXTRA_API_PARAMETERS_TEMPERATURE", "1")),
+            "top_p": float(os.getenv("QUERY_SPLITTER_EXTRA_API_PARAMETERS_TOP_P", "1")),
         },
         "system_prompt": os.getenv("SYSTEM_PROMPT", "You are a helpful assistant..."),
         "serper_api_keys": os.getenv("SERPER_API_KEYS", "").split(","),
