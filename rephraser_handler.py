@@ -1,6 +1,7 @@
 import logging
 import json
 import re
+from datetime import datetime as dt
 
 from openai import AsyncOpenAI
 
@@ -14,12 +15,12 @@ async def rephrase_query(messages, cfg, api_key_manager):
     if not rephraser_instruction:
         rephraser_instruction = '''You are an AI query rephraser. Your task is to analyze the latest user query and chat history (if available).
 
-Rephrase the latest user query **only if it requires external or web-based information** to be answered. If the query can be fully addressed using the chat history, or if it is a greeting, basic writing request, or task that doesn’t necessitate a web search, return `not_needed`.
+Rephrase the latest user query **only if it requires external or web-based information** to be answered. If the query can be fully addressed using the chat history, or if it is a greeting, basic writing request, or task that doesn't necessitate a web search, return `not_needed`.
 
 ### Key Rules:
 1. **Chat History Integration**:  
    - If the latest query is a follow-up to a previous question or statement in the chat history, **reuse the context** to form a complete and accurate query.  
-   - For short follow-ups (e.g., single words like "Diabetes?" or "Arizona?"), **explicitly link them to the previous query’s topic**.  
+   - For short follow-ups (e.g., single words like "Diabetes?" or "Arizona?"), **explicitly link them to the previous query's topic**.  
    - Example 1:  
      Previous Query: *"Why do salty foods suddenly taste more salty to me?"*  
      Latest Query: *"Diabetes?"* → Rephrased: *"Does diabetes cause salty foods to taste more salty?"*  
@@ -99,7 +100,21 @@ Always output your final response within:
     if latest_user_idx is not None:
         for idx, msg in enumerate(rephraser_messages):
             if msg['role'] == 'user':
-                label = "Latest Query: " if idx == latest_user_idx else "Previous Query: "
+                timestamp_str = msg.get('timestamp')
+                if timestamp_str:
+                    try:
+                        timestamp = dt.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f%z")
+                    except ValueError:
+                        try:
+                            timestamp = dt.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
+                        except ValueError:
+                            timestamp = dt.now()
+                else:
+                    timestamp = dt.now()
+                
+                formatted_timestamp = timestamp.strftime("%b %d, %Y %I:%M:%S %p")
+                label = f"Latest Query ({formatted_timestamp}): " if idx == latest_user_idx else f"Previous Query ({formatted_timestamp}): "
+                
                 if isinstance(msg['content'], list):
                     for part in msg['content']:
                         if part.get('type') == 'text':

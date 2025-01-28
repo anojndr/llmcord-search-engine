@@ -518,7 +518,11 @@ async def on_message(new_msg):
                     content = curr_node.text[:max_text]
 
                 if content != "":
-                    message = dict(content=content, role=curr_node.role)
+                    message = dict(
+                        content=content, 
+                        role=curr_node.role,
+                        timestamp=curr_msg.created_at.strftime("%Y-%m-%d %H:%M:%S.%f%z")
+                    )
                     if accept_usernames and curr_node.user_id is not None:
                         message["name"] = str(curr_node.user_id)
 
