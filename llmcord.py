@@ -214,6 +214,12 @@ class MsgNode:
     internet_used: bool = False
 
 def get_config():
+    try:
+        with open('system_prompt.txt', 'r', encoding='utf-8') as f:
+            system_prompt = f.read()
+    except FileNotFoundError:
+        system_prompt = "You are a helpful assistant. Cite the most relevant search results as needed to answer the question, avoiding irrelevant ones. Write only the response and use markdown for formatting. Include a clickable hyperlink at the end of the corresponding sentence, using the name of the site as the link text (e.g., [Wikipedia](https://example.com) or [ResearchGate](https://example.com))."
+
     config = {
         "bot_token": os.getenv("BOT_TOKEN"),
         "client_id": os.getenv("CLIENT_ID"),
@@ -271,6 +277,14 @@ def get_config():
                 "base_url": os.getenv("JAN_BASE_URL", "http://localhost:1337/v1"),
                 "api_keys": [],
             },
+            "deepseek": {
+                "base_url": os.getenv("DEEPSEEK_BASE_URL", "http://localhost:8000/v1"),
+                "api_keys": os.getenv("DEEPSEEK_API_KEYS", "").split(","),
+            },
+            "claude": {
+                "base_url": os.getenv("CLAUDE_BASE_URL", "http://localhost:6600/v1"),
+                "api_keys": os.getenv("CLAUDE_API_KEYS", "").split(","),
+            },
         },
         "model": os.getenv("MODEL", "openai/gpt-4o"),
         "extra_api_parameters": {
@@ -287,7 +301,7 @@ def get_config():
             "temperature": float(os.getenv("QUERY_SPLITTER_EXTRA_API_PARAMETERS_TEMPERATURE", "1")),
             "top_p": float(os.getenv("QUERY_SPLITTER_EXTRA_API_PARAMETERS_TOP_P", "1")),
         },
-        "system_prompt": os.getenv("SYSTEM_PROMPT", "You are a helpful assistant..."),
+        "system_prompt": system_prompt,
         "serper_api_keys": os.getenv("SERPER_API_KEYS", "").split(","),
         "serpapi_api_keys": os.getenv("SERPAPI_API_KEYS", "").split(","),
         "youtube_api_keys": os.getenv("YOUTUBE_API_KEYS", "").split(","),

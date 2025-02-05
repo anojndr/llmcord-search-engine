@@ -71,9 +71,6 @@ query_splitter_extra_api_parameters:
   temperature: 0.5
   top_p: 1.0
 
-system_prompt: >
-  You are a helpful assistant. Cite the most relevant search results as needed to answer the question, avoiding irrelevant ones. Write only the response and use markdown for formatting. Include a clickable hyperlink at the end of the corresponding sentence, using the name of the site as the link text (e.g., [Wikipedia](https://example.com) or [ResearchGate](https://example.com)).
-
 # Serper API settings:
 serper_api_keys:
   - your-serper-api-key-1
