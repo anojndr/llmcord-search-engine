@@ -115,13 +115,16 @@ async def handle_search_query(query, api_key_manager, httpx_client, config=None)
                     break
 
     if not urls:
-        return '<search_results><search_error>No valid URLs found in search results</search_error></search_results>'
+        return '<search_error>No valid URLs found in search results</search_error>'
 
     url_list = [url_data['url'] for url_data in urls]
     contents = await fetch_urls_content(url_list, api_key_manager, httpx_client, config=config)
 
-    results = ['<search_results>']
-    results.extend(error_messages)
+    results = []
+    if error_messages:
+        results.append('<error_messages>')
+        results.extend(error_messages)
+        results.append('</error_messages>')
     
     for idx, ((url_data, content)) in enumerate(zip(urls, contents), start=1):
         results.append(
