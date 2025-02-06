@@ -1,4 +1,4 @@
-discord.py
+discord
 httpx
 openai
 pyyaml
@@ -9,3 +9,5 @@ youtube-transcript-api
 PyPDF2
 Flask
 python-dotenv
+urllib3
+dataclasses-json
