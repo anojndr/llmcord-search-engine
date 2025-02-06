@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Any, Optional, List, Tuple
 import httpx
 from dataclasses import dataclass
-from urllib.parse import urljoin
+from urllib.parse import urljoin, quote
 
 from searxng_config import get_searxng_config
 
@@ -51,18 +51,32 @@ class SearchService:
             Tuple[Optional[List[SearchResult]], Optional[str]]: Search results and error message
         """
         try:
+            # Clean config values by stripping any comments
+            language = self.searxng_config['language'].split('#')[0].strip()
+            categories = self.searxng_config['categories'].split('#')[0].strip()
+            
             params = {
                 'q': query,
                 'format': 'json',
                 'pageno': 1,
-                'language': self.searxng_config['language'],
+                'language': language,
                 'safesearch': self.searxng_config['safe_search'],
-                'categories': self.searxng_config['categories']
+                'categories': categories
             }
             
+            # Manually construct the URL with proper encoding
+            base_url = urljoin(self.searxng_config['base_url'], 'search')
+            param_strings = []
+            for key, value in params.items():
+                encoded_key = quote(str(key))
+                encoded_value = quote(str(value))
+                param_strings.append(f"{encoded_key}={encoded_value}")
+            url = f"{base_url}?{'&'.join(param_strings)}"
+            
+            logger.info(f"Making SearxNG request to: {url}")
+            
             response = await self.httpx_client.get(
-                urljoin(self.searxng_config['base_url'], 'search'),
-                params=params,
+                url,
                 timeout=self.searxng_config['timeout']
             )
             response.raise_for_status()
