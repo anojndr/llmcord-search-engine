@@ -9,14 +9,36 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 async def rephrase_query(messages, cfg, api_key_manager):
+    # Check if the latest user message contains a text file
+    latest_user_msg = None
+    for msg in reversed(messages):
+        if msg['role'] == 'user':
+            latest_user_msg = msg
+            break
+    
+    if latest_user_msg:
+        # Check for text file content in the message
+        if isinstance(latest_user_msg['content'], str):
+            has_text_file = bool(re.search(r'<text_file\s+name="[^"]+"\s*>', latest_user_msg['content']))
+        elif isinstance(latest_user_msg['content'], list):
+            has_text_file = any(
+                isinstance(part.get('text', ''), str) and 
+                bool(re.search(r'<text_file\s+name="[^"]+"\s*>', part.get('text', '')))
+                for part in latest_user_msg['content']
+            )
+        else:
+            has_text_file = False
+            
+        # If text file is present, skip rephrasing
+        if has_text_file:
+            logger.info("Text file detected in message, skipping rephrasing")
+            return 'not_needed'
+
     rephraser_messages = [dict(m) for m in messages]
 
     rephraser_instruction = cfg.get('rephraser_instruction')
     if not rephraser_instruction:
-        rephraser_instruction = '''Here's the modified prompt with XML-enclosed examples and multi-turn conversations added:
-
-<rephraser prompt>
-You are {{Riley}}, an AI query rephraser. Your goal is to help {{user}} get accurate information by determining when web searches are needed and rephrasing queries appropriately. You aim to be clear, concise, and helpful while maintaining a friendly demeanor.
+        rephraser_instruction = '''You are {{Riley}}, an AI query rephraser. Your goal is to help {{user}} get accurate information by determining when web searches are needed and rephrasing queries appropriately. You aim to be clear, concise, and helpful while maintaining a friendly demeanor.
 
 ### When to Search:
 1. Queries about specific people, places, events, or facts
@@ -110,8 +132,7 @@ not_needed
 Always output your final response within:
 <latest_user_query>
 ...rephrased query or not_needed...
-</latest_user_query>
-</rephraser prompt>'''
+</latest_user_query>'''
 
     latest_user_idx = None
     for idx in reversed(range(len(rephraser_messages))):
@@ -160,7 +181,7 @@ Always output your final response within:
 
     rephraser_model = cfg.get('rephraser_model', 'openai/gpt-4o')
     provider, model = rephraser_model.split('/', 1)
-    base_url = cfg['providers'][provider]['base_url']
+    base_url = cfg["providers"][provider]["base_url"]
 
     api_key = await api_key_manager.get_next_api_key(provider)
     if not api_key:
@@ -172,7 +193,7 @@ Always output your final response within:
         model=model,
         messages=rephraser_messages,
         stream=False,
-        extra_body=cfg.get('rephraser_extra_api_parameters', {})
+        extra_body=cfg.get("rephraser_extra_api_parameters", {})
     )
 
     logger.info(f"Payload being sent to LLM API for rephraser:\n{json.dumps(kwargs, indent=2, default=str)}")
@@ -180,13 +201,16 @@ Always output your final response within:
     try:
         response = await rephraser_openai_client.chat.completions.create(**kwargs)
         content = response.choices[0].message.content.strip()
-
-        match = re.search(r'<latest_user_query>\s*(.*?)\s*</latest_user_query>', content, re.DOTALL)
-        if match:
-            latest_user_query = match.group(1).strip()
-            return latest_user_query
-        else:
-            logger.warning("No <latest_user_query> tags found in rephraser response.")
+        try:
+            match = re.search(r'<latest_user_query>\s*(.*?)\s*</latest_user_query>', content, re.DOTALL)
+            if match:
+                latest_user_query = match.group(1).strip()
+                return latest_user_query
+            else:
+                logger.warning("No <latest_user_query> tags found in rephraser response.")
+                return 'not_needed'
+        except json.JSONDecodeError:
+            logger.warning("Failed to parse JSON in rephraser response.")
             return 'not_needed'
     except Exception as e:
         logger.exception("Error while calling rephraser model")
