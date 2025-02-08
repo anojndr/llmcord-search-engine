@@ -172,21 +172,21 @@ Always output your final response within:
                 rephraser_messages[i]['content'] = rephraser_instruction + '\n' + str(original_content)
             break
 
-    rephraser_model = cfg.get('rephraser_model', 'openai/gpt-4o')
-    provider, model = rephraser_model.split('/', 1)
-    api_key = await api_key_manager.get_next_api_key(provider)
+    rephraser_provider = cfg.get('rephraser_provider', 'openai')
+    rephraser_model = cfg.get('rephraser_model', 'gpt-4')
+    api_key = await api_key_manager.get_next_api_key(rephraser_provider)
     if not api_key:
         api_key = 'sk-no-key-required'
 
     kwargs = {
-        "model": model,
+        "model": rephraser_model,
         "messages": rephraser_messages,
         "stream": False,
         "api_key": api_key,
         **cfg.get("rephraser_extra_api_parameters", {})
     }
 
-    if provider == "gemini":
+    if rephraser_provider == "google":
         kwargs["safety_settings"] = [
             {
                 "category": "HARM_CATEGORY_HARASSMENT",

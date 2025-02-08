@@ -46,9 +46,9 @@ Output:
 
     formatted_prompt = query_splitter_prompt.format(query=query)
 
-    query_splitter_model = cfg.get('query_splitter_model', 'openai/gpt-3.5-turbo')
-    provider, model = query_splitter_model.split('/', 1)
-    api_key = await api_key_manager.get_next_api_key(provider)
+    query_splitter_provider = cfg.get('query_splitter_provider', 'openai')
+    query_splitter_model = cfg.get('query_splitter_model', 'gpt-4')
+    api_key = await api_key_manager.get_next_api_key(query_splitter_provider)
     if not api_key:
         api_key = 'sk-no-key-required'
 
@@ -58,14 +58,14 @@ Output:
     ]
 
     kwargs = {
-        "model": model,
+        "model": query_splitter_model,
         "messages": messages,
         "stream": False,
         "api_key": api_key,
         **cfg.get("query_splitter_extra_api_parameters", {})
     }
 
-    if provider == "gemini":
+    if query_splitter_provider == "google":
         kwargs["safety_settings"] = [
             {
                 "category": "HARM_CATEGORY_HARASSMENT",

@@ -40,7 +40,7 @@ VISION_MODEL_TAGS = (
     "gpt-4o",
     "claude-3",
     "gemini",
-    "pixtral",
+    "pixtral", 
     "llava",
     "vision",
     "vl",
@@ -256,17 +256,20 @@ def get_config():
                 "api_keys": os.getenv("CLAUDE_API_KEYS", "").split(","),
             },
         },
-        "model": os.getenv("MODEL", "openai/gpt-4o"),
+        "provider": os.getenv("PROVIDER", "openai"),
+        "model": os.getenv("MODEL", "gpt-4"),
         "extra_api_parameters": {
             "temperature": float(os.getenv("EXTRA_API_PARAMETERS_TEMPERATURE", "1")),
             "top_p": float(os.getenv("EXTRA_API_PARAMETERS_TOP_P", "1")),
         },
-        "rephraser_model": os.getenv("REPHRASER_MODEL", "openai/gpt-4o-mini"),
+        "rephraser_provider": os.getenv("REPHRASER_PROVIDER", "openai"),
+        "rephraser_model": os.getenv("REPHRASER_MODEL", "gpt-4"),
         "rephraser_extra_api_parameters": {
             "temperature": float(os.getenv("REPHRASER_EXTRA_API_PARAMETERS_TEMPERATURE", "1")),
             "top_p": float(os.getenv("REPHRASER_EXTRA_API_PARAMETERS_TOP_P", "1")),
         },
-        "query_splitter_model": os.getenv("QUERY_SPLITTER_MODEL", "openai/gpt-4o-mini"),
+        "query_splitter_provider": os.getenv("QUERY_SPLITTER_PROVIDER", "openai"),
+        "query_splitter_model": os.getenv("QUERY_SPLITTER_MODEL", "gpt-4"),
         "query_splitter_extra_api_parameters": {
             "temperature": float(os.getenv("QUERY_SPLITTER_EXTRA_API_PARAMETERS_TEMPERATURE", "1")),
             "top_p": float(os.getenv("QUERY_SPLITTER_EXTRA_API_PARAMETERS_TOP_P", "1")),
@@ -365,13 +368,12 @@ async def on_message(new_msg):
     )
 
     try:
-        provider, model = cfg["model"].split("/", 1)
-        api_key = await api_key_manager.get_next_api_key(provider)
+        api_key = await api_key_manager.get_next_api_key(cfg["provider"])
         if not api_key:
             api_key = 'sk-no-key-required'
 
-        accept_images = any(x in model.lower() for x in VISION_MODEL_TAGS)
-        accept_usernames = any(x in provider.lower() for x in PROVIDERS_SUPPORTING_USERNAMES)
+        accept_images = any(x in cfg["model"].lower() for x in VISION_MODEL_TAGS)
+        accept_usernames = any(x in cfg["provider"].lower() for x in PROVIDERS_SUPPORTING_USERNAMES)
 
         max_text = cfg["max_text"]
         max_images = cfg["max_images"] if accept_images else 0
@@ -699,14 +701,14 @@ async def on_message(new_msg):
             searched_for_text = ''
 
         kwargs = {
-            "model": model,
+            "model": cfg["model"],
             "messages": messages,
             "stream": True,
             "api_key": api_key,
             **cfg["extra_api_parameters"]
         }
 
-        if provider == "gemini":
+        if cfg["provider"] == "google":
             kwargs["safety_settings"] = [
                 {
                     "category": "HARM_CATEGORY_HARASSMENT",
@@ -773,7 +775,7 @@ async def on_message(new_msg):
                             )
                             for warning in sorted(user_warnings):
                                 embed.add_field(name=warning, value="", inline=False)
-                            footer_text = f"Model: {model} | " + (
+                            footer_text = f"Model: {cfg['model']} | " + (
                                 "Internet used"
                                 if msg_nodes[new_msg.id].internet_used
                                 else "Internet NOT used"
@@ -842,7 +844,7 @@ async def on_message(new_msg):
                                 if msg_split_incoming or is_good_finish
                                 else EMBED_COLOR_INCOMPLETE
                             )
-                            footer_text = f"Model: {model} | " + (
+                            footer_text = f"Model: {cfg['model']} | " + (
                                 "Internet used"
                                 if msg_nodes[new_msg.id].internet_used
                                 else "Internet NOT used"
