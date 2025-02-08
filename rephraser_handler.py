@@ -9,7 +9,6 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 async def rephrase_query(messages, cfg, api_key_manager):
-    # Check if the latest user message contains a text file
     latest_user_msg = None
     for msg in reversed(messages):
         if msg['role'] == 'user':
@@ -17,7 +16,6 @@ async def rephrase_query(messages, cfg, api_key_manager):
             break
     
     if latest_user_msg:
-        # Check for text file content in the message
         if isinstance(latest_user_msg['content'], str):
             has_text_file = bool(re.search(r'<text_file\s+name="[^"]+"\s*>', latest_user_msg['content']))
         elif isinstance(latest_user_msg['content'], list):
@@ -29,7 +27,6 @@ async def rephrase_query(messages, cfg, api_key_manager):
         else:
             has_text_file = False
             
-        # If text file is present, skip rephrasing
         if has_text_file:
             logger.info("Text file detected in message, skipping rephrasing")
             return 'not_needed'

@@ -55,18 +55,15 @@ async def fetch_urls_content(urls, api_key_manager, httpx_client, config=None):
                     html_content = response.text
                     soup = BeautifulSoup(html_content, 'lxml')
                     
-                    # Remove unnecessary elements
                     for tag in soup(['script', 'style', 'header', 'footer', 'nav', 'aside', 'form', 'svg', 'canvas']):
                         tag.decompose()
                     for c in soup.find_all(text=lambda text: isinstance(text, Comment)):
                         c.extract()
                     
-                    # Extract metadata
                     title = soup.title.string if soup.title else 'No title found'
                     meta_desc = soup.find('meta', {'name': 'description'})
                     description = meta_desc['content'] if meta_desc else 'No description found'
                     
-                    # Get main content
                     text_content = soup.get_text(separator=' ', strip=True)
                     
                     return (

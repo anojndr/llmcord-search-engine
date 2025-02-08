@@ -32,13 +32,10 @@ async def handle_search_query(query: str, api_key_manager, httpx_client: httpx.A
     max_urls = config.get('max_urls', 5)
     search_service = SearchService(api_key_manager, httpx_client)
     
-    # Perform search across all providers
     results, errors = await search_service.search(query, max_urls)
     
-    # Start building XML response
     xml_parts = ['<search_results>']
     
-    # Add any error messages
     if errors:
         xml_parts.append('<error_messages>')
         for error in errors:
@@ -50,11 +47,9 @@ async def handle_search_query(query: str, api_key_manager, httpx_client: httpx.A
         xml_parts.append('</search_results>')
         return '\n'.join(xml_parts)
     
-    # Fetch content for all URLs
     url_list = [result.url for result in results]
     contents = await fetch_urls_content(url_list, api_key_manager, httpx_client, config=config)
     
-    # Add search results with content
     for idx, (result, content) in enumerate(zip(results, contents), start=1):
         xml_parts.extend([
             f'<search_result id="{idx}">',

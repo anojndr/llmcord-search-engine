@@ -51,7 +51,6 @@ class SearchService:
             Tuple[Optional[List[SearchResult]], Optional[str]]: Search results and error message
         """
         try:
-            # Clean config values by stripping any comments
             language = self.searxng_config['language'].split('#')[0].strip()
             categories = self.searxng_config['categories'].split('#')[0].strip()
             
@@ -64,7 +63,6 @@ class SearchService:
                 'categories': categories
             }
             
-            # Manually construct the URL with proper encoding
             base_url = urljoin(self.searxng_config['base_url'], 'search')
             param_strings = []
             for key, value in params.items():
@@ -220,26 +218,22 @@ class SearchService:
         """
         errors = []
         
-        # Try SearxNG first
         results, error = await self.search_with_searxng(query, max_urls)
         if results:
             return results, errors
         if error:
             errors.append(error)
             
-        # Try Serper as first fallback
         results, error = await self.search_with_serper(query, max_urls)
         if results:
             return results, errors
         if error:
             errors.append(error)
             
-        # Try Bing as final fallback
         results, error = await self.search_with_bing(query, max_urls)
         if results:
             return results, errors
         if error:
             errors.append(error)
             
-        # If all providers failed, return empty results
         return [], errors

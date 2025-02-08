@@ -18,7 +18,8 @@ from url_handler import extract_urls_from_text, fetch_urls_content
 from rephraser_handler import rephrase_query
 from query_splitter_handler import split_query
 from google_lens_handler import get_google_lens_results, process_google_lens_results
-from image_handler import fetch_images_from_serper
+from saucenao_handler import handle_saucenao_query
+from searxng_image_handler import fetch_images
 
 from discord.ui import View, Button, TextInput
 from discord import File
@@ -305,6 +306,7 @@ def get_config():
         "serper_api_keys": os.getenv("SERPER_API_KEYS", "").split(","),
         "serpapi_api_keys": os.getenv("SERPAPI_API_KEYS", "").split(","),
         "youtube_api_keys": os.getenv("YOUTUBE_API_KEYS", "").split(","),
+        "saucenao_api_key": os.getenv("SAUCENAO_API_KEY", ""),
         "max_urls": int(os.getenv("MAX_URLS", "5")),
     }
     return config
@@ -583,32 +585,39 @@ async def on_message(new_msg):
 
         user_message_content = new_msg.content
 
-        if user_message_content.lower().startswith('lens'):
-            user_message_content = user_message_content[len('lens'):].lstrip()
+        if user_message_content.lower().startswith(('lens', 'sauce')):
+            is_lens = user_message_content.lower().startswith('lens')
+            prefix_len = len('lens') if is_lens else len('sauce')
+            user_message_content = user_message_content[prefix_len:].lstrip()
 
             if len(new_msg.attachments) == 0:
-                await progress_message.edit(content="Please attach an image for the Google Lens search.", allowed_mentions=allowed_mentions)
+                service_name = "Google Lens" if is_lens else "SauceNAO"
+                await progress_message.edit(content=f"Please attach an image for the {service_name} search.", allowed_mentions=allowed_mentions)
                 return
 
             image_attachment = new_msg.attachments[0]
             image_url = image_attachment.url
 
-            serpapi_api_key = await api_key_manager.get_next_api_key('serpapi')
-            if not serpapi_api_key:
-                await progress_message.edit(content='No SerpApi API key available.', allowed_mentions=allowed_mentions)
-                return
-
             try:
-                lens_results = await get_google_lens_results(image_url, api_key_manager, httpx_client)
+                if is_lens:
+                    lens_results = await get_google_lens_results(image_url, api_key_manager, httpx_client)
+                    formatted_results = await process_google_lens_results(lens_results, cfg, api_key_manager, httpx_client)
+                    results_tag = 'lens_results'
+                else:
+                    saucenao_api_key = cfg.get('saucenao_api_key')
+                    if not saucenao_api_key:
+                        await progress_message.edit(content='No SauceNAO API key available.', allowed_mentions=allowed_mentions)
+                        return
+                    formatted_results = await handle_saucenao_query(image_url, saucenao_api_key, httpx_client)
+                    results_tag = 'saucenao_results'
             except Exception as e:
-                await progress_message.edit(content=f"Error calling Google Lens API: {e}", allowed_mentions=allowed_mentions)
+                service_name = "Google Lens" if is_lens else "SauceNAO"
+                await progress_message.edit(content=f"Error calling {service_name} API: {e}", allowed_mentions=allowed_mentions)
                 return
-
-            formatted_lens_results = await process_google_lens_results(lens_results, cfg, api_key_manager, httpx_client)
 
             augmented_user_message = (
                 f'<user_query>\n{html.escape(user_message_content)}\n</user_query>\n\n'
-                f'<lens_results>\n{formatted_lens_results}\n</lens_results>'
+                f'<{results_tag}>\n{formatted_results}\n</{results_tag}>'
             )
 
             for message in reversed(messages):
@@ -626,6 +635,7 @@ async def on_message(new_msg):
 
             msg_nodes[new_msg.id].text = augmented_user_message
             msg_nodes[new_msg.id].internet_used = True
+
         else:
             urls_in_message = extract_urls_from_text(new_msg.content)
             is_url_query = False
@@ -678,20 +688,13 @@ async def on_message(new_msg):
                     augmented_user_message = search_results
 
                     if split_queries:
-                        image_files_dict = {}
-                        image_urls_dict = {}
-                        
-                        for query in split_queries:
-                            files, urls = await fetch_images_from_serper([query], 5, api_key_manager, httpx_client)
-                            image_files_dict[query] = files
-                            image_urls_dict[query] = urls
-
+                        image_files_dict, image_urls_dict = await fetch_images(split_queries, 5, api_key_manager, httpx_client)
                         msg_nodes[new_msg.id].image_files = image_files_dict
                         msg_nodes[new_msg.id].image_urls = image_urls_dict
                     else:
-                        files, urls = await fetch_images_from_serper([latest_user_query], 5, api_key_manager, httpx_client)
-                        msg_nodes[new_msg.id].image_files = {latest_user_query: files}
-                        msg_nodes[new_msg.id].image_urls = {latest_user_query: urls}
+                        image_files_dict, image_urls_dict = await fetch_images([latest_user_query], 5, api_key_manager, httpx_client)
+                        msg_nodes[new_msg.id].image_files = image_files_dict
+                        msg_nodes[new_msg.id].image_urls = image_urls_dict
 
             if augmented_user_message:
                 for message in reversed(messages):
