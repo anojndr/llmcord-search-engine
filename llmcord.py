@@ -9,7 +9,8 @@ import logging
 from typing import Literal, Optional
 import discord
 import httpx
-from openai import AsyncOpenAI
+from litellm import completion as litellm_completion
+from litellm import acompletion as litellm_acompletion
 from dotenv import load_dotenv
 import html
 
@@ -235,55 +236,24 @@ def get_config():
         "use_plain_responses": os.getenv("USE_PLAIN_RESPONSES", "false").lower() == "true",
         "providers": {
             "openai": {
-                "base_url": os.getenv("OPENAI_BASE_URL"),
                 "api_keys": os.getenv("OPENAI_API_KEYS", "").split(","),
             },
             "x-ai": {
-                "base_url": os.getenv("XAI_BASE_URL"),
                 "api_keys": os.getenv("XAI_API_KEYS", "").split(","),
             },
             "google": {
-                "base_url": os.getenv("GOOGLE_BASE_URL"),
                 "api_keys": os.getenv("GOOGLE_API_KEYS", "").split(","),
             },
             "mistral": {
-                "base_url": os.getenv("MISTRAL_BASE_URL", "https://api.mistral.ai/v1"),
                 "api_keys": os.getenv("MISTRAL_API_KEYS", "").split(","),
             },
             "groq": {
-                "base_url": os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1"),
                 "api_keys": os.getenv("GROQ_API_KEYS", "").split(","),
             },
             "openrouter": {
-                "base_url": os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"),
                 "api_keys": os.getenv("OPENROUTER_API_KEYS", "").split(","),
             },
-            "ollama": {
-                "base_url": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1"),
-                "api_keys": [],
-            },
-            "lmstudio": {
-                "base_url": os.getenv("LMSTUDIO_BASE_URL", "http://localhost:1234/v1"),
-                "api_keys": [],
-            },
-            "vllm": {
-                "base_url": os.getenv("VLLM_BASE_URL", "http://localhost:8000/v1"),
-                "api_keys": [],
-            },
-            "oobabooga": {
-                "base_url": os.getenv("OOBOOGA_BASE_URL", "http://localhost:5000/v1"),
-                "api_keys": [],
-            },
-            "jan": {
-                "base_url": os.getenv("JAN_BASE_URL", "http://localhost:1337/v1"),
-                "api_keys": [],
-            },
-            "deepseek": {
-                "base_url": os.getenv("DEEPSEEK_BASE_URL", "http://localhost:8000/v1"),
-                "api_keys": os.getenv("DEEPSEEK_API_KEYS", "").split(","),
-            },
             "claude": {
-                "base_url": os.getenv("CLAUDE_BASE_URL", "http://localhost:6600/v1"),
                 "api_keys": os.getenv("CLAUDE_API_KEYS", "").split(","),
             },
         },
@@ -397,12 +367,9 @@ async def on_message(new_msg):
 
     try:
         provider, model = cfg["model"].split("/", 1)
-        base_url = cfg["providers"][provider]["base_url"]
         api_key = await api_key_manager.get_next_api_key(provider)
         if not api_key:
             api_key = 'sk-no-key-required'
-
-        openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
 
         accept_images = any(x in model.lower() for x in VISION_MODEL_TAGS)
         accept_usernames = any(x in provider.lower() for x in PROVIDERS_SUPPORTING_USERNAMES)
@@ -732,12 +699,37 @@ async def on_message(new_msg):
         else:
             searched_for_text = ''
 
-        kwargs = dict(
-            model=model,
-            messages=messages,
-            stream=True,
-            extra_body=cfg["extra_api_parameters"],
-        )
+        kwargs = {
+            "model": model,
+            "messages": messages,
+            "stream": True,
+            "api_key": api_key,
+            **cfg["extra_api_parameters"]
+        }
+
+        if provider == "gemini":
+            kwargs["safety_settings"] = [
+                {
+                    "category": "HARM_CATEGORY_HARASSMENT",
+                    "threshold": "BLOCK_NONE",
+                },
+                {
+                    "category": "HARM_CATEGORY_HATE_SPEECH",
+                    "threshold": "BLOCK_NONE",
+                },
+                {
+                    "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                    "threshold": "BLOCK_NONE",
+                },
+                {
+                    "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                    "threshold": "BLOCK_NONE",
+                },
+                {
+                    "category": "HARM_CATEGORY_CIVIC_INTEGRITY",
+                    "threshold": "BLOCK_NONE",
+                }                
+            ]
 
         logging_kwargs = json.loads(json.dumps(kwargs, default=str))
         for message in logging_kwargs.get('messages', []):
@@ -753,9 +745,7 @@ async def on_message(new_msg):
         )
         
         try:
-            async for curr_chunk in await openai_client.chat.completions.create(
-                **kwargs
-            ):
+            async for curr_chunk in await litellm_acompletion(**kwargs):
                 prev_content = (
                     prev_chunk.choices[0].delta.content
                     if prev_chunk is not None and prev_chunk.choices[0].delta.content
@@ -910,4 +900,4 @@ async def main():
     finally:
         await httpx_client.aclose()
 
-asyncio.run(main()) 
+asyncio.run(main())

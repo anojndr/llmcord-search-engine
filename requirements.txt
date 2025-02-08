@@ -1,13 +1,12 @@
 discord
 httpx
 openai
-pyyaml
 beautifulsoup4
 lxml
 google-api-python-client
 youtube-transcript-api
 PyPDF2
 Flask
-python-dotenv
+python-dotenv 
 urllib3
 dataclasses-json

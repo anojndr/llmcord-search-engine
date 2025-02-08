@@ -2,7 +2,7 @@ import logging
 import json
 import re
 
-from openai import AsyncOpenAI
+from litellm import acompletion
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -48,8 +48,6 @@ Output:
 
     query_splitter_model = cfg.get('query_splitter_model', 'openai/gpt-3.5-turbo')
     provider, model = query_splitter_model.split('/', 1)
-    base_url = cfg["providers"][provider]["base_url"]
-
     api_key = await api_key_manager.get_next_api_key(provider)
     if not api_key:
         api_key = 'sk-no-key-required'
@@ -59,19 +57,42 @@ Output:
         {"role": "user", "content": formatted_prompt}
     ]
 
-    query_splitter_openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+    kwargs = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "api_key": api_key,
+        **cfg.get("query_splitter_extra_api_parameters", {})
+    }
 
-    kwargs = dict(
-        model=model,
-        messages=messages,
-        stream=False,
-        extra_body=cfg.get("query_splitter_extra_api_parameters", {})
-    )
+    if provider == "gemini":
+        kwargs["safety_settings"] = [
+            {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_NONE",
+            },
+            {
+                "category": "HARM_CATEGORY_HATE_SPEECH",
+                "threshold": "BLOCK_NONE",
+            },
+            {
+                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "threshold": "BLOCK_NONE",
+            },
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_NONE",
+            },
+            {
+                "category": "HARM_CATEGORY_CIVIC_INTEGRITY",
+                "threshold": "BLOCK_NONE",
+            }
+        ]
 
     logger.info(f"Payload being sent to LLM API for query_splitter:\n{json.dumps(kwargs, indent=2, default=str)}")
 
     try:
-        response = await query_splitter_openai_client.chat.completions.create(**kwargs)
+        response = await acompletion(**kwargs)
         content = response.choices[0].message.content.strip()
         try:
             match = re.search(r'\[.*\]', content, re.DOTALL)

@@ -4,7 +4,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 WORKDIR /usr/src/app
 
 COPY . .
-# Ensure system_prompt.txt is included
+# Ensure system_prompt.txt is included  
 COPY system_prompt.txt .
 
 RUN pip install --no-cache-dir -r requirements.txt

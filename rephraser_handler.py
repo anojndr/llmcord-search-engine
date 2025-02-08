@@ -3,7 +3,7 @@ import json
 import re
 from datetime import datetime as dt
 
-from openai import AsyncOpenAI
+from litellm import acompletion
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -175,20 +175,41 @@ Always output your final response within:
 
     rephraser_model = cfg.get('rephraser_model', 'openai/gpt-4o')
     provider, model = rephraser_model.split('/', 1)
-    base_url = cfg["providers"][provider]["base_url"]
-
     api_key = await api_key_manager.get_next_api_key(provider)
     if not api_key:
         api_key = 'sk-no-key-required'
 
-    rephraser_openai_client = AsyncOpenAI(base_url=base_url, api_key=api_key)
+    kwargs = {
+        "model": model,
+        "messages": rephraser_messages,
+        "stream": False,
+        "api_key": api_key,
+        **cfg.get("rephraser_extra_api_parameters", {})
+    }
 
-    kwargs = dict(
-        model=model,
-        messages=rephraser_messages,
-        stream=False,
-        extra_body=cfg.get("rephraser_extra_api_parameters", {})
-    )
+    if provider == "gemini":
+        kwargs["safety_settings"] = [
+            {
+                "category": "HARM_CATEGORY_HARASSMENT",
+                "threshold": "BLOCK_NONE",
+            },
+            {
+                "category": "HARM_CATEGORY_HATE_SPEECH",
+                "threshold": "BLOCK_NONE",
+            },
+            {
+                "category": "HARM_CATEGORY_SEXUALLY_EXPLICIT",
+                "threshold": "BLOCK_NONE",
+            },
+            {
+                "category": "HARM_CATEGORY_DANGEROUS_CONTENT",
+                "threshold": "BLOCK_NONE",
+            },
+            {
+                "category": "HARM_CATEGORY_CIVIC_INTEGRITY",
+                "threshold": "BLOCK_NONE",
+            }
+        ]
 
     logging_kwargs = json.loads(json.dumps(kwargs, default=str))
     for message in logging_kwargs.get('messages', []):
@@ -201,9 +222,8 @@ Always output your final response within:
 
     logger.info(f"Payload being sent to LLM API for rephraser:\n{json.dumps(logging_kwargs, indent=2, default=str)}")
 
-
     try:
-        response = await rephraser_openai_client.chat.completions.create(**kwargs)
+        response = await acompletion(**kwargs)
         content = response.choices[0].message.content.strip()
         try:
             match = re.search(r'<latest_user_query>\s*(.*?)\s*</latest_user_query>', content, re.DOTALL)
@@ -213,8 +233,8 @@ Always output your final response within:
             else:
                 logger.warning("No <latest_user_query> tags found in rephraser response.")
                 return 'not_needed'
-        except json.JSONDecodeError:
-            logger.warning("Failed to parse JSON in rephraser response.")
+        except Exception:
+            logger.warning("Failed to parse response in rephraser response.")
             return 'not_needed'
     except Exception as e:
         logger.exception("Error while calling rephraser model")
