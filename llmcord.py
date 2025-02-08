@@ -9,7 +9,6 @@ import logging
 from typing import Literal, Optional
 import discord
 import httpx
-from litellm import completion as litellm_completion
 from litellm import acompletion as litellm_acompletion
 from dotenv import load_dotenv
 import html
