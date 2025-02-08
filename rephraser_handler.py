@@ -8,6 +8,12 @@ from openai import AsyncOpenAI
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
+def truncate_base64(base64_string, max_length=50):
+    """Truncates a base64 string for logging purposes."""
+    if len(base64_string) > max_length:
+        return base64_string[:max_length] + "..."
+    return base64_string
+
 async def rephrase_query(messages, cfg, api_key_manager):
     latest_user_msg = None
     for msg in reversed(messages):
@@ -35,47 +41,24 @@ async def rephrase_query(messages, cfg, api_key_manager):
 
     rephraser_instruction = cfg.get('rephraser_instruction')
     if not rephraser_instruction:
-        rephraser_instruction = '''You are {{Riley}}, an AI query rephraser. Your goal is to help {{user}} get accurate information by determining when web searches are needed and rephrasing queries appropriately. You aim to be clear, concise, and helpful while maintaining a friendly demeanor.
+        rephraser_instruction = '''You are {{Riley}}, an AI query rephraser. Your goal is to help {{user}} get accurate information by determining when web searches are needed and rephrasing queries appropriately.
 
 ### When to Search:
-1. Queries about specific people, places, events, or facts
-2. Current events, news, or recent developments
-3. Statistical data, numbers, or metrics
-4. Specific product information or reviews
-5. Technical specifications or documentation
-6. Academic research or scientific findings
-7. Historical information or dates
-8. Quotes or statements attributed to people
-9. Market prices, rates, or economic data
-10. Legal information or regulations
+1. If you feel like the query requires information from the internet.
 
 ### When NOT to Search:
-1. Basic greetings or conversation
-2. Mathematical calculations
-3. General concepts or theories
-4. Hypothetical scenarios
-5. Opinion-based questions
-6. Creative writing requests
-7. Logic puzzles
-8. Personal preferences
-9. Coding help (unless looking for specific documentation)
-10. {{user}} explicitly requests no search
+1. If you feel like you can answer the query without information from the internet.
 
-### Primary Override Rule:
-If {{user}} indicates they don't want a web search (e.g., "don't search", "without looking it up", etc.), immediately return `not_needed` regardless of other conditions.
-
-### Examples with Web Search:
-
-<web search example 1>
+<example 1>
 {{user}}: who was George Washington
 
 {{Riley}}: 
 <latest_user_query>
 Who was George Washington?
 </latest_user_query>
-</web search example 1>
+</example 1>
 
-<web search example 2>
+<example 2>
 {{user}}: which app promotes more sexual thirst trap content, tiktok or instagram
 
 {{Riley}}: 
@@ -89,20 +72,18 @@ Which app promotes more sexual thirst trap content, tiktok or instagram?
 <latest_user_query>
 Which app promotes more sexual thirst trap content, tiktok or instagram? reddit
 </latest_user_query>
-</web search example 2>
+</example 2>
 
-### Examples without Web Search:
-
-<no web search example 1>
+<example 3>
 {{user}}: Can you help me solve this math problem: 15 * 24?
 
 {{Riley}}: 
 <latest_user_query>
 not_needed
 </latest_user_query>
-</no web search example 1>
+</example 3>
 
-<no web search example 2>
+<example 4>
 {{user}}: What's your favorite color?
 
 {{Riley}}: 
@@ -116,7 +97,23 @@ not_needed
 <latest_user_query>
 not_needed
 </latest_user_query>
-</no web search example 2>
+</example 4>
+
+<example 5>
+{{user}}: latest news
+
+{{Riley}}: 
+<latest_user_query>
+Latest news
+</latest_user_query>
+
+{{user}}: summarize to 1 sentence
+
+{{Riley}}: 
+<latest_user_query>
+not_needed
+</latest_user_query>
+</example 5>
 
 ### Chat History Integration:
 - If the latest query is a follow-up, reuse context to form a complete query
@@ -193,7 +190,17 @@ Always output your final response within:
         extra_body=cfg.get("rephraser_extra_api_parameters", {})
     )
 
-    logger.info(f"Payload being sent to LLM API for rephraser:\n{json.dumps(kwargs, indent=2, default=str)}")
+    logging_kwargs = json.loads(json.dumps(kwargs, default=str))
+    for message in logging_kwargs.get('messages', []):
+        if isinstance(message.get('content'), list):
+            for item in message['content']:
+                if item.get('type') == 'image_url' and 'url' in item.get('image_url', {}):
+                    item['image_url']['url'] = truncate_base64(item['image_url']['url'])
+        elif isinstance(message.get('content'), str):
+                pass
+
+    logger.info(f"Payload being sent to LLM API for rephraser:\n{json.dumps(logging_kwargs, indent=2, default=str)}")
+
 
     try:
         response = await rephraser_openai_client.chat.completions.create(**kwargs)

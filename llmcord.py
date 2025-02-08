@@ -331,6 +331,12 @@ httpx_client = httpx.AsyncClient()
 msg_nodes = {}
 last_task_time = None
 
+def truncate_base64(base64_string, max_length=50):
+    """Truncates a base64 string for logging purposes."""
+    if len(base64_string) > max_length:
+        return base64_string[:max_length] + "..."
+    return base64_string
+
 @discord_client.event
 async def on_message(new_msg):
     global msg_nodes, last_task_time, httpx_client
@@ -733,10 +739,19 @@ async def on_message(new_msg):
             extra_body=cfg["extra_api_parameters"],
         )
 
-        logging.info(
-            f"Payload being sent to LLM API:\n{json.dumps(kwargs, indent=2, default=str)}"
-        )
+        logging_kwargs = json.loads(json.dumps(kwargs, default=str))
+        for message in logging_kwargs.get('messages', []):
+            if isinstance(message.get('content'), list):
+                for item in message['content']:
+                    if item.get('type') == 'image_url' and 'url' in item.get('image_url', {}):
+                        item['image_url']['url'] = truncate_base64(item['image_url']['url'])
+            elif isinstance(message.get('content'), str):
+                pass
 
+        logging.info(
+            f"Payload being sent to LLM API:\n{json.dumps(logging_kwargs, indent=2, default=str)}"
+        )
+        
         try:
             async for curr_chunk in await openai_client.chat.completions.create(
                 **kwargs
@@ -895,4 +910,4 @@ async def main():
     finally:
         await httpx_client.aclose()
 
-asyncio.run(main())
+asyncio.run(main()) 
