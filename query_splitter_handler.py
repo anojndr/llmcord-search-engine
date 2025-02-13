@@ -89,27 +89,55 @@ Output:
             }
         ]
 
-    logger.info(f"Payload being sent to LLM API for query_splitter:\n{json.dumps(kwargs, indent=2, default=str)}")
+    logging_kwargs = json.loads(json.dumps(kwargs, default=str))
+    for message in logging_kwargs.get('messages', []):
+        if isinstance(message.get('content'), list):
+            for item in message['content']:
+                if item.get('type') == 'image_url' and 'url' in item.get('image_url', {}):
+                    item['image_url']['url'] = truncate_base64(item['image_url']['url'])
+        elif isinstance(message.get('content'), str):
+            pass
 
-    try:
-        response = await acompletion(**kwargs)
-        content = response.choices[0].message.content.strip()
+    logger.info(f"Payload being sent to LLM API for query_splitter:\n{json.dumps(logging_kwargs, indent=2, default=str)}")
+
+    # ---- RETRY LOOP FOR QUERY SPLITTER CALL ----
+    max_retries = 3
+    response = None
+    for i in range(max_retries):
         try:
-            match = re.search(r'\[.*\]', content, re.DOTALL)
-            if match:
-                json_content = match.group(0)
-                queries = json.loads(json_content)
-                if isinstance(queries, list) and all(isinstance(q, str) for q in queries):
-                    return queries
-                else:
-                    logger.warning("Invalid JSON array format in query_splitter response.")
-                    return [query]
-            else:
-                logger.warning("No JSON array found in query_splitter response.")
+            logger.info("Attempt %d for query splitter using API key: %s", i+1, kwargs.get("api_key"))
+            response = await acompletion(**kwargs)
+            break
+        except Exception as e:
+            logger.exception("Error while calling query_splitter model, retrying with new API key. Attempt %d/%d", i+1, max_retries)
+            kwargs["api_key"] = await api_key_manager.get_next_api_key(query_splitter_provider)
+            if i == max_retries - 1:
                 return [query]
-        except json.JSONDecodeError:
-            logger.warning("Failed to parse JSON in query_splitter response.")
-            return [query]
-    except Exception as e:
-        logger.exception("Error while calling query_splitter model")
+    # ---- END RETRY LOOP ----
+
+    if response is None:
         return [query]
+
+    content = response.choices[0].message.content.strip()
+    try:
+        match = re.search(r'\[.*\]', content, re.DOTALL)
+        if match:
+            json_content = match.group(0)
+            queries = json.loads(json_content)
+            if isinstance(queries, list) and all(isinstance(q, str) for q in queries):
+                return queries
+            else:
+                logger.warning("Invalid JSON array format in query_splitter response.")
+                return [query]
+        else:
+            logger.warning("No JSON array found in query_splitter response.")
+            return [query]
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse JSON in query_splitter response.")
+        return [query]
+
+def truncate_base64(base64_string, max_length=50):
+    """Utility function used for logging purposes."""
+    if len(base64_string) > max_length:
+        return base64_string[:max_length] + "..."
+    return base64_string

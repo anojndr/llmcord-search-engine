@@ -76,8 +76,7 @@ async def fetch_urls_content(urls, api_key_manager, httpx_client, config=None):
                         f'</webpage_content>'
                     )
                 else:
-                    text_content = response.text
-                    return f'<raw_content>\n{text_content}\n</raw_content>'
+                    return f'<error>Unsupported content type: {content_type}</error>'
 
             except Exception as e:
                 return f'<error>Error fetching content from {url}: {e}</error>'

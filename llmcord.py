@@ -749,8 +749,27 @@ async def on_message(new_msg):
             f"Payload being sent to LLM API:\n{json.dumps(logging_kwargs, indent=2, default=str)}"
         )
         
+        # ----- RETRY LOGIC FOR MAIN MODEL CALL -----
+        max_retries = 3
+        attempt = 0
+        response_stream = None
+        while attempt < max_retries:
+            try:
+                logging.info(f"Attempt {attempt+1} for main model using API key: {kwargs['api_key']}")
+                response_stream = await litellm_acompletion(**kwargs)
+                break
+            except Exception as e:
+                logging.exception("Error in main model prompt, retrying with new API key. Attempt %d/%d", attempt+1, max_retries)
+                kwargs["api_key"] = await api_key_manager.get_next_api_key(cfg["provider"])
+                attempt += 1
+
+        if response_stream is None:
+            await progress_message.edit(content="An error occurred while processing your request.", allowed_mentions=allowed_mentions)
+            return
+        # ----- END RETRY LOGIC -----
+
         try:
-            async for curr_chunk in await litellm_acompletion(**kwargs):
+            async for curr_chunk in response_stream:
                 prev_content = (
                     prev_chunk.choices[0].delta.content
                     if prev_chunk is not None and prev_chunk.choices[0].delta.content

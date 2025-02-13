@@ -210,31 +210,33 @@ Always output your final response within:
             }
         ]
 
-    logging_kwargs = json.loads(json.dumps(kwargs, default=str))
-    for message in logging_kwargs.get('messages', []):
-        if isinstance(message.get('content'), list):
-            for item in message['content']:
-                if item.get('type') == 'image_url' and 'url' in item.get('image_url', {}):
-                    item['image_url']['url'] = truncate_base64(item['image_url']['url'])
-        elif isinstance(message.get('content'), str):
-                pass
-
-    logger.info(f"Payload being sent to LLM API for rephraser:\n{json.dumps(logging_kwargs, indent=2, default=str)}")
-
-    try:
-        response = await acompletion(**kwargs)
-        content = response.choices[0].message.content.strip()
+    # ---- RETRY LOOP FOR REPHRASER CALL ----
+    max_retries = 3
+    response = None
+    for i in range(max_retries):
         try:
-            match = re.search(r'<latest_user_query>\s*(.*?)\s*</latest_user_query>', content, re.DOTALL)
-            if match:
-                latest_user_query = match.group(1).strip()
-                return latest_user_query
-            else:
-                logger.warning("No <latest_user_query> tags found in rephraser response.")
+            logger.info("Attempt %d for rephraser model using API key: %s", i+1, kwargs.get("api_key"))
+            response = await acompletion(**kwargs)
+            break
+        except Exception as e:
+            logger.exception("Error while calling rephraser model, retrying with new API key. Attempt %d/%d", i+1, max_retries)
+            kwargs["api_key"] = await api_key_manager.get_next_api_key(rephraser_provider)
+            if i == max_retries - 1:
                 return 'not_needed'
-        except Exception:
-            logger.warning("Failed to parse response in rephraser response.")
+    # ---- END RETRY LOOP ----
+
+    if response is None:
+        return 'not_needed'
+
+    content = response.choices[0].message.content.strip()
+    try:
+        match = re.search(r'<latest_user_query>\s*(.*?)\s*</latest_user_query>', content, re.DOTALL)
+        if match:
+            latest_user_query = match.group(1).strip()
+            return latest_user_query
+        else:
+            logger.warning("No <latest_user_query> tags found in rephraser response.")
             return 'not_needed'
-    except Exception as e:
-        logger.exception("Error while calling rephraser model")
+    except Exception:
+        logger.warning("Failed to parse response in rephraser response.")
         return 'not_needed'
