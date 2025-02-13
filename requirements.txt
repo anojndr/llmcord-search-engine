@@ -1,5 +1,5 @@
 discord
-httpx
+httpx[http2]
 openai
 beautifulsoup4
 lxml

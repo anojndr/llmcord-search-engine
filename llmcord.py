@@ -59,6 +59,27 @@ MAX_MESSAGE_NODES = 100
 
 load_dotenv()
 
+async def fetch_images_and_update_views(split_queries, user_msg_id, response_msgs, api_key_manager, httpx_client):
+    """Background task to fetch images and update response messages with results"""
+    try:
+        image_files_dict, image_urls_dict = await fetch_images(split_queries, 5, api_key_manager, httpx_client)
+        
+        async with msg_nodes[user_msg_id].lock:
+            msg_nodes[user_msg_id].image_files = image_files_dict
+            msg_nodes[user_msg_id].image_urls = image_urls_dict
+        
+        for response_msg in response_msgs:
+            new_view = OutputView(
+                contents=msg_nodes[response_msg.id].text,
+                query=msg_nodes[user_msg_id].text,
+                serper_queries=split_queries,
+                image_files=image_files_dict,
+                image_urls=image_urls_dict
+            )
+            await response_msg.edit(view=new_view)
+    except Exception as e:
+        logging.error(f"Error in image fetch background task: {e}")
+
 class ImageCountModal(discord.ui.Modal, title="Select Number of Images"):
     def __init__(self, parent_view):
         super().__init__()
@@ -96,19 +117,11 @@ class OutputView(discord.ui.View):
         self.contents = contents
         self.query = query
         self.serper_queries = serper_queries
-        
-        if isinstance(image_files, dict):
-            self.image_files = image_files
-        else:
-            self.image_files = {query: image_files} if image_files else {}
-            
-        if isinstance(image_urls, dict):
-            self.image_urls = image_urls
-        else:
-            self.image_urls = {query: image_urls} if image_urls else {}
+        self.image_files = image_files or {}
+        self.image_urls = image_urls or {}
 
         self.add_text_file_button()
-        if self.serper_queries is not None:
+        if self.serper_queries and (self.image_files or self.image_urls):
             self.add_show_images_button()
 
     def add_text_file_button(self):
@@ -298,7 +311,7 @@ activity = discord.Game(
 )
 discord_client = discord.Client(intents=intents, activity=activity)
 
-httpx_client = httpx.AsyncClient()
+httpx_client = httpx.AsyncClient(http2=True)
 
 msg_nodes = {}
 last_task_time = None
@@ -661,15 +674,6 @@ async def on_message(new_msg):
 
                     augmented_user_message = search_results
 
-                    if split_queries:
-                        image_files_dict, image_urls_dict = await fetch_images(split_queries, 5, api_key_manager, httpx_client)
-                        msg_nodes[new_msg.id].image_files = image_files_dict
-                        msg_nodes[new_msg.id].image_urls = image_urls_dict
-                    else:
-                        image_files_dict, image_urls_dict = await fetch_images([latest_user_query], 5, api_key_manager, httpx_client)
-                        msg_nodes[new_msg.id].image_files = image_files_dict
-                        msg_nodes[new_msg.id].image_urls = image_urls_dict
-
             if augmented_user_message:
                 for message in reversed(messages):
                     if message['role'] == 'user':
@@ -782,7 +786,7 @@ async def on_message(new_msg):
                             )
                             embed.set_footer(text=footer_text)
 
-                            view = OutputView(response_contents, user_message_content, serper_queries, msg_nodes[new_msg.id].image_files, msg_nodes[new_msg.id].image_urls)
+                            view = OutputView(response_contents, user_message_content, serper_queries)
 
                             if response_msgs == []:
                                 response_msg = await progress_message.edit(
@@ -859,7 +863,7 @@ async def on_message(new_msg):
                 prev_chunk = curr_chunk
 
             if use_plain_responses:
-                view = OutputView(response_contents, user_message_content, serper_queries, msg_nodes[new_msg.id].image_files, msg_nodes[new_msg.id].image_urls)
+                view = OutputView(response_contents, user_message_content, serper_queries)
 
                 for content in response_contents:
                     if response_msgs == []:
@@ -889,6 +893,18 @@ async def on_message(new_msg):
             for msg_id in sorted(msg_nodes.keys())[: num_nodes - MAX_MESSAGE_NODES]:
                 async with msg_nodes.setdefault(msg_id, MsgNode()).lock:
                     msg_nodes.pop(msg_id, None)
+
+        user_msg_node = msg_nodes.get(new_msg.id)
+        if user_msg_node and user_msg_node.serper_queries:
+            asyncio.create_task(
+                fetch_images_and_update_views(
+                    user_msg_node.serper_queries,
+                    new_msg.id,
+                    response_msgs,
+                    api_key_manager,
+                    httpx_client
+                )
+            )
 
     except Exception:
         logging.exception("Error in on_message handler")

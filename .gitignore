@@ -9,3 +9,5 @@
 !docker-compose.yaml
 !requirements.txt
 !.env.example
+
+organizer.py

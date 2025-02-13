@@ -97,7 +97,7 @@ async def fetch_reddit_content(url, api_key_manager, httpx_client=None, retries=
         proxies = None
 
     if httpx_client is None:
-        httpx_client = httpx.AsyncClient(proxies=proxies, timeout=10.0)
+        httpx_client = httpx.AsyncClient(proxies=proxies, timeout=10.0, http2=True)
 
     try:
         response = await httpx_client.get(url, follow_redirects=True)
