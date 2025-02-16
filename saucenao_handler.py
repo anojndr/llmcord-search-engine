@@ -1,5 +1,8 @@
 """
-SauceNAO handler module for image source lookup functionality.
+SauceNAO Handler Module
+
+Provides functionality to perform a SauceNAO image source lookup using its API.
+It downloads the given image, sends it to the SauceNAO API, and formats the results in XML.
 """
 
 import logging
@@ -20,22 +23,24 @@ async def handle_saucenao_query(
     min_similarity: float = 50.0
 ) -> str:
     """
-    Handle image lookup using SauceNAO API.
-    
+    Look up an image source using the SauceNAO API.
+
     Args:
-        image_url (str): URL of the image to search
-        api_key (str): SauceNAO API key
-        httpx_client (httpx.AsyncClient): HTTP client
-        min_similarity (float): Minimum similarity threshold
-        
+        image_url (str): URL of the image to search.
+        api_key (str): SauceNAO API key.
+        httpx_client (httpx.AsyncClient): HTTP client for requests.
+        min_similarity (float): Minimum similarity threshold to consider (default: 50.0).
+
     Returns:
-        str: XML-formatted search results
+        str: XML-formatted results from SauceNAO.
     """
     try:
+        # Download the image to send to SauceNAO.
         image_response = await httpx_client.get(image_url)
         image_response.raise_for_status()
         image_data = image_response.content
         
+        # Prepare multipart file upload.
         files = {
             'file': ('image.png', image_data, 'image/png')
         }
@@ -80,6 +85,7 @@ async def handle_saucenao_query(
             data_obj = result.get('data', {})
             
             similarity = float(header.get('similarity', 0))
+            # Skip results with similarity below the threshold.
             if similarity < min_similarity:
                 continue
                 
@@ -94,6 +100,7 @@ async def handle_saucenao_query(
                 '<result_data>'
             ])
             
+            # Convert result data into XML elements.
             for key, value in data_obj.items():
                 if isinstance(value, list):
                     xml_parts.extend([

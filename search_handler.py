@@ -1,5 +1,8 @@
 """
-Main search handler module using SearchService for web search functionality.
+Search Handler Module
+
+Delegates search queries to the SearchService and then wraps the results (and any errors)
+in a structured XML format. Also supports fetching URL content from the search results.
 """
 
 import logging
@@ -14,17 +17,16 @@ logger.setLevel(logging.INFO)
 
 async def handle_search_query(query: str, api_key_manager, httpx_client: httpx.AsyncClient, config: Optional[Dict[str, Any]] = None) -> str:
     """
-    Handle search queries using SearchService with multiple providers and fallbacks.
-    Returns results in structured XML format.
-    
+    Perform a search using multiple providers with fallback logic, and combine the results into XML.
+
     Args:
-        query (str): Search query
-        api_key_manager: API key manager instance
-        httpx_client (httpx.AsyncClient): HTTP client
-        config (Optional[Dict[str, Any]]): Configuration dictionary
-        
+        query (str): The search query.
+        api_key_manager: API key manager instance.
+        httpx_client (httpx.AsyncClient): HTTP client for web requests.
+        config (dict, optional): Additional configuration options.
+
     Returns:
-        str: XML-formatted search results
+        str: An XML string containing search results.
     """
     if config is None:
         config = {}
@@ -47,6 +49,7 @@ async def handle_search_query(query: str, api_key_manager, httpx_client: httpx.A
         xml_parts.append('</search_results>')
         return '\n'.join(xml_parts)
     
+    # Extract the URLs from the search results and fetch their page content.
     url_list = [result.url for result in results]
     contents = await fetch_urls_content(url_list, api_key_manager, httpx_client, config=config)
     

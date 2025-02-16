@@ -1,5 +1,8 @@
 """
-Search service module implementing SearxNG, Serper, and Bing search functionality.
+Search Service Module
+
+Implements web search functionality using SearxNG as the main provider, with fallbacks to Serper API and Bing API.
+Defines a SearchResult data class to represent individual search hits.
 """
 
 import os
@@ -15,21 +18,33 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SearchResult:
-    """Data class for storing individual search results."""
+    """
+    Data class representing a single search result.
+    
+    Attributes:
+        url (str): URL of the search result.
+        title (str): Title of the result.
+        snippet (str): A brief snippet or summary.
+    """
     url: str
     title: str
     snippet: str
 
 class SearchService:
-    """Service class handling search operations across multiple providers."""
+    """
+    Service class for handling search queries.
+    
+    This service attempts to perform a search with SearxNG first, then falls back
+    to Serper API and finally Bing API if needed.
+    """
     
     def __init__(self, api_key_manager, httpx_client: httpx.AsyncClient):
         """
-        Initialize the search service.
+        Initialize SearchService with an API key manager and HTTP client.
         
         Args:
-            api_key_manager: API key manager instance
-            httpx_client (httpx.AsyncClient): HTTP client for making requests
+            api_key_manager: API key manager instance.
+            httpx_client (httpx.AsyncClient): HTTP client.
         """
         self.api_key_manager = api_key_manager
         self.httpx_client = httpx_client
@@ -41,14 +56,18 @@ class SearchService:
         max_urls: int = 5
     ) -> Tuple[Optional[List[SearchResult]], Optional[str]]:
         """
-        Perform a search using SearxNG.
+        Search using SearxNG.
+
+        Constructs the SearxNG URL from configuration, makes the HTTP request, and parses the JSON response.
         
         Args:
-            query (str): Search query
-            max_urls (int): Maximum number of results
-            
+            query (str): Search query.
+            max_urls (int): Maximum results to retrieve.
+        
         Returns:
-            Tuple[Optional[List[SearchResult]], Optional[str]]: Search results and error message
+            Tuple containing either:
+              - A list of SearchResult objects.
+              - Or an error message if something went wrong.
         """
         try:
             language = self.searxng_config['language'].split('#')[0].strip()
@@ -103,14 +122,14 @@ class SearchService:
         max_urls: int = 5
     ) -> Tuple[Optional[List[SearchResult]], Optional[str]]:
         """
-        Perform a search using Serper API as fallback.
-        
+        Perform a search using the Serper API as a fallback.
+
         Args:
-            query (str): Search query
-            max_urls (int): Maximum number of results
-            
+            query (str): Search query.
+            max_urls (int): Maximum number of results.
+        
         Returns:
-            Tuple[Optional[List[SearchResult]], Optional[str]]: Search results and error message
+            Tuple containing the list of SearchResult or an error message.
         """
         try:
             api_key = await self.api_key_manager.get_next_api_key('serper')
@@ -153,14 +172,14 @@ class SearchService:
         max_urls: int = 5
     ) -> Tuple[Optional[List[SearchResult]], Optional[str]]:
         """
-        Perform a search using Bing API as final fallback.
-        
+        Perform a search using the Bing API as the final fallback.
+
         Args:
-            query (str): Search query
-            max_urls (int): Maximum number of results
+            query (str): The search query.
+            max_urls (int): Maximum results to return.
             
         Returns:
-            Tuple[Optional[List[SearchResult]], Optional[str]]: Search results and error message
+            Tuple containing a list of SearchResult objects or an error message.
         """
         try:
             subscription_key = os.getenv('BING_SEARCH_V7_SUBSCRIPTION_KEY')
@@ -207,14 +226,21 @@ class SearchService:
         max_urls: int = 5
     ) -> Tuple[List[SearchResult], List[str]]:
         """
-        Perform search across all providers with fallback logic.
-        
+        Perform a search across all providers with fallback logic.
+
+        The order of attempts is:
+            1. SearxNG
+            2. Serper API
+            3. Bing API
+
         Args:
-            query (str): Search query
-            max_urls (int): Maximum number of results
+            query (str): The search query.
+            max_urls (int): Maximum results for each attempt.
             
         Returns:
-            Tuple[List[SearchResult], List[str]]: Search results and error messages
+            Tuple[List[SearchResult], List[str]]:
+              - A list of search results.
+              - A list of error messages encountered during the search attempts.
         """
         errors = []
         

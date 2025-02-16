@@ -1,3 +1,10 @@
+"""
+YouTube Handler Module
+
+This module extracts YouTube video IDs from URLs, fetches video metadata, transcripts,
+and top comments via the YouTube API and YouTube Transcript API, and outputs XML-formatted content.
+"""
+
 import re
 import logging
 import random
@@ -15,8 +22,10 @@ logger.setLevel(logging.DEBUG)
 
 def _find_proxies_file(filename="proxies.txt"):
     """
-    Attempts to find a file named 'proxies.txt' first in the current directory,
-    then in /etc/secrets. Returns the file path if it exists, else None.
+    Attempt to find a proxies file in the current directory or /etc/secrets.
+    
+    Returns:
+        str or None: Absolute path to the file if found, else None.
     """
     if os.path.exists(filename):
         return os.path.abspath(filename)
@@ -27,8 +36,13 @@ def _find_proxies_file(filename="proxies.txt"):
     
 def load_proxies(filename="proxies.txt"):
     """
-    Loads proxies from the specified file. Each line can be a simple URL or include user:pass.
-    Returns a list of proxy URLs, or an empty list if the file is not found or empty.
+    Load proxy URLs from the specified file.
+    
+    Args:
+        filename (str): Name of the file containing proxies.
+    
+    Returns:
+        list: List of proxy URL strings.
     """
     filepath = _find_proxies_file(filename)
     proxies = []
@@ -57,8 +71,10 @@ def load_proxies(filename="proxies.txt"):
 
 def get_random_proxy():
     """
-    Randomly select a proxy URL string from proxies_list.
-    Returns None if proxies_list is empty.
+    Randomly select and return a proxy URL from the list, if available.
+    
+    Returns:
+        str or None: Proxy URL string or None if no proxies are set.
     """
     proxies_list = load_proxies()
     if not proxies_list:
@@ -67,11 +83,15 @@ def get_random_proxy():
 
 def extract_video_id(url):
     """
-    Extract a YouTube video ID from the provided URL.
-    1) First, try to parse the 'v' parameter from the query string (e.g. ?v=xxxx).
-    2) If that fails, fall back to known patterns (youtu.be, /embed/, /shorts/, etc.).
-    Returns None if no ID can be found.
+    Extract a YouTube video ID from a given URL.
+    
+    Args:
+        url (str): The YouTube URL.
+    
+    Returns:
+        str or None: The extracted video ID, or None if it cannot be found.
     """
+    # Try extracting "v" parameter from query string.
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query)
     if "v" in query_params and query_params["v"]:
@@ -79,6 +99,7 @@ def extract_video_id(url):
         if extracted:
             return extracted
 
+    # Fallback to matching known URL patterns.
     patterns = [
         r'youtu\.be/([^/?&]+)',
         r'youtube\.com/watch\?v=([^&]+)',
@@ -93,7 +114,15 @@ def extract_video_id(url):
     return None
 
 def format_duration(duration_str):
-    """Convert YouTube duration string to human-readable format."""
+    """
+    Convert a YouTube duration string (ISO 8601) to a human-readable format.
+
+    Args:
+        duration_str (str): Duration string (e.g., "PT1H2M30S").
+    
+    Returns:
+        str: Human-readable duration.
+    """
     match = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', duration_str)
     if not match:
         return "Unknown duration"
@@ -112,8 +141,17 @@ def format_duration(duration_str):
 
 async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments=50):
     """
-    Given a YouTube URL, fetch metadata, transcript, and top comments.
-    Returns content in XML format with detailed metadata and error handling.
+    Fetch YouTube video information including metadata, transcript, and top comments.
+    Returns an XML-formatted string containing all gathered details.
+
+    Args:
+        url (str): YouTube video URL.
+        api_key_manager: API key manager instance.
+        httpx_client (httpx.AsyncClient): HTTP client.
+        max_comments (int): Maximum number of comments to retrieve.
+
+    Returns:
+        str: XML content containing video metadata, transcript, and comments.
     """
     video_id = extract_video_id(url)
     if not video_id:
@@ -152,6 +190,7 @@ async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments
             'tags': ', '.join(html.escape(tag) for tag in snippet.get('tags', []))
         }
 
+        # Optionally use a proxy for the transcript API.
         proxy_url = get_random_proxy()
         try:
             if proxy_url:

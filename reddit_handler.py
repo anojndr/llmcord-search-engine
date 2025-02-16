@@ -1,3 +1,10 @@
+"""
+Reddit Handler Module
+
+This module uses asyncpraw to fetch Reddit submissions and their comments.
+The content is then formatted into XML for further processing.
+"""
+
 import asyncpraw
 import logging
 import html
@@ -8,9 +15,14 @@ logger.setLevel(logging.DEBUG)
 
 def get_reddit_instance():
     """
-    Creates an asyncpraw Reddit instance using credentials from the environment.
-    If the needed environment variables are not set, the instance will be created with empty strings,
-    which may lead to authentication errors.
+    Create an asyncpraw Reddit instance using environment credentials.
+    
+    Returns:
+        asyncpraw.Reddit: Configured Reddit API client.
+    
+    Note:
+        If environment variables are not set, empty strings are used,
+        which may lead to authentication errors.
     """
     client_id = os.getenv("REDDIT_CLIENT_ID", "")
     client_secret = os.getenv("REDDIT_CLIENT_SECRET", "")
@@ -26,13 +38,15 @@ def get_reddit_instance():
 
 def _parse_comments(comments, comment_list):
     """
-    Recursively traverse asyncpraw comment forests.
-    Appends each comment’s data (if available) to comment_list.
+    Recursively traverse asyncpraw comment forests and extract comment data.
+    
+    Args:
+        comments: Iterable of comment objects.
+        comment_list: List to populate with parsed comment data.
     """
     for comment in comments:
-        # Ensure we are only processing Comment objects (and skip MoreComments)
+        # Process only genuine Comment objects (skip MoreComments)
         if isinstance(comment, asyncpraw.models.Comment):
-            # Some comments may be deleted or removed
             if comment.body:
                 comment_data = {
                     'body': html.escape(comment.body),
@@ -41,31 +55,28 @@ def _parse_comments(comments, comment_list):
                     'created_utc': comment.created_utc or 0
                 }
                 comment_list.append(comment_data)
-            # Recursively process replies
+            # Recursively process any replies
             if hasattr(comment, "replies"):
                 _parse_comments(comment.replies, comment_list)
 
 async def fetch_reddit_content(url, api_key_manager, httpx_client=None, retries=3):
     """
-    Fetches a Reddit submission and its comments by using asyncpraw.
-    The submission information and comments are then formatted into XML.
-
+    Fetch a Reddit submission and its comments, then format as XML.
+    
     Args:
-        url (str): The URL of the Reddit post.
-        api_key_manager: (Unused in this implementation, kept for compatibility.)
-        httpx_client: (Unused, kept for compatibility.)
-        retries (int): Number of retries (not used in this asyncpraw version).
-
+        url (str): URL of the Reddit post.
+        api_key_manager: Unused parameter kept for interface compatibility.
+        httpx_client: Unused, kept for compatibility.
+        retries (int): Number of retries (unused in the current implementation).
+    
     Returns:
-        str: XML-formatted content containing the submission and its comments.
+        str: An XML string containing the submission details and comments.
     """
     try:
         reddit = get_reddit_instance()
-        # Create a Submission object directly from the URL.
         submission = await reddit.submission(url=url)
-        await submission.load()  # Make sure all metadata is loaded
+        await submission.load()  # Ensure full metadata is loaded
 
-        # Extract submission details
         title = html.escape(submission.title or "")
         selftext = html.escape(submission.selftext or "")
         author = html.escape(submission.author.name) if submission.author else "[deleted]"
@@ -74,12 +85,11 @@ async def fetch_reddit_content(url, api_key_manager, httpx_client=None, retries=
         num_comments = submission.num_comments or 0
         subreddit = html.escape(submission.subreddit.display_name) if submission.subreddit else ""
 
-        # Replace any "more comments" and retrieve the full comments forest.
+        # Load all comments, replacing "more comments"
         await submission.comments.replace_more(limit=0)
         comment_list = []
         _parse_comments(submission.comments, comment_list)
 
-        # Build XML-formatted response
         xml_parts = [
             "<reddit_response>",
             "  <post>",
@@ -96,7 +106,7 @@ async def fetch_reddit_content(url, api_key_manager, httpx_client=None, retries=
             "  <comments>"
         ]
 
-        # Append every comment in XML format
+        # Append each comment in XML format.
         for comment in comment_list:
             xml_parts.extend([
                 "    <comment>",

@@ -1,5 +1,8 @@
 """
-SearxNG image search handler implementation with Serper fallback.
+SearxNG Image Handler Module
+
+This module implements image search using SearxNG with a fallback to Serper.
+It defines helper functions to normalize, download and wrap image data as Discord Files.
 """
 
 import logging
@@ -17,14 +20,14 @@ logger.setLevel(logging.DEBUG)
 
 def normalize_image_url(image_url: str, base_url: str = None) -> Optional[str]:
     """
-    Normalize image URLs to ensure they are absolute and properly formatted.
-    
+    Normalize image URLs ensuring they are absolute and valid.
+
     Args:
-        image_url (str): The image URL to normalize
-        base_url (str, optional): The base URL to use for relative URLs
-        
+        image_url (str): The raw image URL.
+        base_url (str, optional): Base URL to resolve relative URLs.
+
     Returns:
-        Optional[str]: Normalized URL or None if invalid
+        str or None: A normalized image URL or None if unable to resolve.
     """
     try:
         if image_url.startswith('data:'):
@@ -58,15 +61,15 @@ def normalize_image_url(image_url: str, base_url: str = None) -> Optional[str]:
 
 async def download_image(image_url: str, httpx_client: httpx.AsyncClient, base_url: str = None) -> Optional[bytes]:
     """
-    Download an image from a given URL with improved error handling and URL normalization.
-    
+    Download an image given its URL, handling data URLs and HTTP requests.
+
     Args:
-        image_url (str): URL of the image to download
-        httpx_client (httpx.AsyncClient): HTTP client to use
-        base_url (str, optional): Base URL for resolving relative URLs
-        
+        image_url (str): The URL to download.
+        httpx_client (httpx.AsyncClient): HTTP client to make requests.
+        base_url (str, optional): Base URL for resolving relative image URLs.
+    
     Returns:
-        Optional[bytes]: Image data or None if download fails
+        bytes or None: Downloaded image data, or None if download fails.
     """
     try:
         normalized_url = normalize_image_url(image_url, base_url)
@@ -98,16 +101,18 @@ async def download_image(image_url: str, httpx_client: httpx.AsyncClient, base_u
 
 async def fetch_images_from_searxng(query: str, num_images: int, api_key_manager, httpx_client: httpx.AsyncClient) -> Tuple[List[File], List[str]]:
     """
-    Fetch images from SearxNG using the images category.
+    Search for images using SearxNG under the 'images' category.
     
     Args:
-        query (str): Search query
-        num_images (int): Number of images to fetch
-        api_key_manager: API key manager instance
-        httpx_client (httpx.AsyncClient): HTTP client
-        
+        query (str): Search query.
+        num_images (int): Number of desired images.
+        api_key_manager: API key manager instance.
+        httpx_client (httpx.AsyncClient): HTTP client.
+    
     Returns:
-        Tuple[List[File], List[str]]: List of image files and list of failed image URLs
+        Tuple:
+          - Dictionary of Discord File objects (for successfully downloaded images).
+          - List of URLs for images that failed to download.
     """
     image_files = []
     image_urls = []
@@ -149,6 +154,7 @@ async def fetch_images_from_searxng(query: str, num_images: int, api_key_manager
         image_tasks = []
         urls_to_try = []
         
+        # Optionally map source URLs (if needed later)
         source_urls = {result.get('source_url'): result.get('img_src') for result in data['results']}
         
         for result in data['results'][:num_images * 2]: 
@@ -187,17 +193,19 @@ async def fetch_images_from_searxng(query: str, num_images: int, api_key_manager
 
 async def fetch_images(queries: List[str], num_images: int, api_key_manager, httpx_client: httpx.AsyncClient) -> Tuple[Dict[str, List[File]], Dict[str, List[str]]]:
     """
-    Fetch images for multiple queries using SearxNG with Serper fallback.
+    For a given list of queries, fetch images using SearxNG, and if necessary,
+    fall back to fetching from Serper.
     
     Args:
-        queries (List[str]): List of search queries
-        num_images (int): Number of images per query
-        api_key_manager: API key manager instance
-        httpx_client (httpx.AsyncClient): HTTP client
-        
+        queries (List[str]): List of search queries.
+        num_images (int): Desired number of images per query.
+        api_key_manager: API key manager.
+        httpx_client (httpx.AsyncClient): HTTP client.
+    
     Returns:
-        Tuple[Dict[str, List[File]], Dict[str, List[str]]]: 
-            Dictionaries mapping queries to image files and failed URLs
+        Tuple:
+          - Dict mapping each query to a list of Discord File objects.
+          - Dict mapping each query to a list of URLs for which images could not be downloaded.
     """
     image_files_dict = {}
     image_urls_dict = {}

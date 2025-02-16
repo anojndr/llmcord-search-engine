@@ -1,3 +1,14 @@
+"""
+llmcord Main Application
+
+This is the entry point for the LLM-based Discord bot. The bot processes messages,
+manages conversations, integrates web search, image processing, YouTube/Reddit content extraction,
+and finally communicates with various large language models (LLMs) for responses.
+
+The code includes detailed logic for message chaining, retry loops for streaming API responses,
+and configuration-based behavior.
+"""
+
 import os
 import asyncio
 import re
@@ -13,6 +24,7 @@ from litellm import acompletion as litellm_acompletion
 from dotenv import load_dotenv
 import html
 
+# Import all handler modules for search, URL extraction, rephrasing and query splitting.
 from search_handler import handle_search_query
 from url_handler import extract_urls_from_text, fetch_urls_content
 from rephraser_handler import rephrase_query
@@ -29,13 +41,16 @@ from api_key_manager import APIKeyManager
 
 from keep_alive import keep_alive
 
+# Set up logging configuration for the application.
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s: %(message)s",
 )
 
+# Start the keep-alive HTTP server in a separate thread.
 keep_alive()
 
+# Constants defining which models support image (vision) inputs.
 VISION_MODEL_TAGS = (
     "gpt-4o",
     "claude-3",
@@ -45,22 +60,35 @@ VISION_MODEL_TAGS = (
     "vision",
     "vl",
 )
+# Providers that support including usernames in the messages.
 PROVIDERS_SUPPORTING_USERNAMES = ("openai", "x-ai")
 
 ALLOWED_FILE_TYPES = ("image", "text")
 
+# Embed colors for Discord messages.
 EMBED_COLOR_COMPLETE = discord.Color.dark_green()
 EMBED_COLOR_INCOMPLETE = discord.Color.orange()
 
+# Indicator appended to streaming responses.
 STREAMING_INDICATOR = " ⚪"
 EDIT_DELAY_SECONDS = 1
 
 MAX_MESSAGE_NODES = 100
 
+# Load environment variables from .env file.
 load_dotenv()
 
 async def fetch_images_and_update_views(split_queries, user_msg_id, response_msgs, api_key_manager, httpx_client):
-    """Background task to fetch images and update response messages with results"""
+    """
+    Background task to fetch images asynchronously and update response messages.
+    
+    Args:
+        split_queries (list): List of search query strings.
+        user_msg_id (str or int): The unique ID of the user’s message.
+        response_msgs (list): Discord messages to edit with image content.
+        api_key_manager: API key manager helper.
+        httpx_client (httpx.AsyncClient): HTTP client.
+    """
     try:
         image_files_dict, image_urls_dict = await fetch_images(split_queries, 5, api_key_manager, httpx_client)
         
@@ -82,6 +110,12 @@ async def fetch_images_and_update_views(split_queries, user_msg_id, response_msg
 
 class ImageCountModal(discord.ui.Modal, title="Select Number of Images"):
     def __init__(self, parent_view):
+        """
+        Initialize the modal that asks the user for the number of images.
+        
+        Args:
+            parent_view (discord.ui.View): The parent view to update when the modal is submitted.
+        """
         super().__init__()
         self.parent_view = parent_view
         
@@ -96,6 +130,9 @@ class ImageCountModal(discord.ui.Modal, title="Select Number of Images"):
         self.add_item(self.image_count)
 
     async def on_submit(self, interaction: discord.Interaction):
+        """
+        Called when the user submits their image count input.
+        """
         try:
             count = int(self.image_count.value)
             if 1 <= count <= 5:
@@ -113,6 +150,16 @@ class ImageCountModal(discord.ui.Modal, title="Select Number of Images"):
 
 class OutputView(discord.ui.View):
     def __init__(self, contents, query, serper_queries=None, image_files=None, image_urls=None):
+        """
+        Initialize the Output view used to display message content and buttons.
+
+        Args:
+            contents: The text content for the output.
+            query: Original user query.
+            serper_queries (list, optional): List of queries used for image search.
+            image_files (dict, optional): Mapping of queries to Discord File objects.
+            image_urls (dict, optional): Mapping of queries to URLs that failed to download.
+        """
         super().__init__(timeout=None)
         self.contents = contents
         self.query = query
@@ -120,11 +167,14 @@ class OutputView(discord.ui.View):
         self.image_files = image_files or {}
         self.image_urls = image_urls or {}
 
+        # Add a button to download output text as a file.
         self.add_text_file_button()
+        # Add a button to show images if available.
         if self.serper_queries and (self.image_files or self.image_urls):
             self.add_show_images_button()
 
     def add_text_file_button(self):
+        """Add a button that triggers sending the text output as a file."""
         text_file_button = Button(
             label="Get Output as Text File",
             style=discord.ButtonStyle.primary,
@@ -134,6 +184,7 @@ class OutputView(discord.ui.View):
         self.add_item(text_file_button)
 
     def add_show_images_button(self):
+        """Add a button that triggers showing images."""
         show_images_button = Button(
             label="Show Images",
             style=discord.ButtonStyle.secondary,
@@ -143,6 +194,9 @@ class OutputView(discord.ui.View):
         self.add_item(show_images_button)
 
     async def text_file_button_callback(self, interaction: discord.Interaction):
+        """
+        Callback that sends the text output as a text file.
+        """
         await self.send_text_file(interaction)
         for item in self.children:
             if item.custom_id == "text_file":
@@ -151,6 +205,9 @@ class OutputView(discord.ui.View):
         await interaction.message.edit(view=self)
 
     async def show_images_button_callback(self, interaction: discord.Interaction):
+        """
+        Callback that opens a modal to let the user choose how many images to display.
+        """
         total_images = sum(len(files) for files in self.image_files.values()) + \
                       sum(len(urls) for urls in self.image_urls.values())
                       
@@ -167,6 +224,9 @@ class OutputView(discord.ui.View):
         await interaction.message.edit(view=self)
 
     async def send_text_file(self, interaction: discord.Interaction):
+        """
+        Compile the full content into a file and send it.
+        """
         full_content = "".join(self.contents)
         file = io.StringIO(full_content)
         await interaction.response.send_message(
@@ -176,6 +236,12 @@ class OutputView(discord.ui.View):
         )
 
     async def show_images(self, interaction: discord.Interaction, selected_count: int):
+        """
+        Based on the selected count, send the images or error messages.
+
+        Args:
+            selected_count (int): The number of images to display per query.
+        """
         await interaction.response.defer()
 
         if len(self.image_files) == 1 and not self.serper_queries:
@@ -208,31 +274,51 @@ class OutputView(discord.ui.View):
 
 @dataclass
 class MsgNode:
+    """
+    Data class representing a node in the conversation chain.
+    
+    Attributes:
+        text (str): The text content of the message.
+        images (list): List of attached image data.
+        role (str): Either "user" or "assistant".
+        user_id (int): ID of the user who sent the message.
+        next_msg (discord.Message): The next message in the chain.
+        has_bad_attachments (bool): Indicator of unsupported attachments.
+        fetch_next_failed (bool): Indicates if fetching the next message failed.
+        lock (asyncio.Lock): Lock for synchronizing concurrent access.
+        serper_queries (list): List of search queries from splitting.
+        image_files (list): List of Discord File objects for images.
+        image_urls (list): List of image URLs that failed to download.
+        internet_used (bool): Whether internet searches were used to augment the message.
+    """
     text: Optional[str] = None
     images: list = field(default_factory=list)
-
     role: Literal["user", "assistant"] = "assistant"
     user_id: Optional[int] = None
-
     next_msg: Optional[discord.Message] = None
-
     has_bad_attachments: bool = False
     fetch_next_failed: bool = False
-
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-
     serper_queries: Optional[list] = None
     image_files: Optional[list] = None
     image_urls: Optional[list] = None
-
     internet_used: bool = False
 
 def get_config():
+    """
+    Load and return configuration options from environment variables and the system_prompt.txt file.
+    
+    Returns:
+        dict: A dictionary of configuration settings.
+    """
     try:
         with open('system_prompt.txt', 'r', encoding='utf-8') as f:
             system_prompt = f.read()
     except FileNotFoundError:
-        system_prompt = "You are a helpful assistant. Cite the most relevant search results as needed to answer the question, avoiding irrelevant ones. Write only the response and use markdown for formatting. Include a clickable hyperlink at the end of the corresponding sentence, using the name of the site as the link text (e.g., [Wikipedia](https://example.com) or [ResearchGate](https://example.com))."
+        system_prompt = ("You are a helpful assistant. Cite the most relevant search results as needed to answer the "
+                         "question, avoiding irrelevant ones. Write only the response and use markdown for formatting. "
+                         "Include a clickable hyperlink at the end of the corresponding sentence, using the name of the site "
+                         "as the link text (e.g., [Wikipedia](https://example.com) or [ResearchGate](https://example.com)).")
 
     config = {
         "bot_token": os.getenv("BOT_TOKEN"),
@@ -268,6 +354,9 @@ def get_config():
             "claude": {
                 "api_keys": os.getenv("CLAUDE_API_KEYS", "").split(","),
             },
+            "openrouter": {
+                "api_keys": os.getenv("OPENROUTER_API_KEYS", "").split(","),
+            },
         },
         "provider": os.getenv("PROVIDER", "openai"),
         "model": os.getenv("MODEL", "gpt-4"),
@@ -296,6 +385,7 @@ def get_config():
     }
     return config
 
+# Load configuration and instantiate the API key manager.
 cfg = get_config()
 api_key_manager = APIKeyManager(cfg)
 
@@ -304,6 +394,7 @@ if client_id := cfg["client_id"]:
         f"\n\nBOT INVITE URL:\nhttps://discord.com/api/oauth2/authorize?client_id={client_id}&permissions=412317273088&scope=bot\n"
     )
 
+# Initialize Discord client and activity.
 intents = discord.Intents.default()
 intents.message_content = True
 activity = discord.Game(
@@ -311,23 +402,35 @@ activity = discord.Game(
 )
 discord_client = discord.Client(intents=intents, activity=activity)
 
+# Create an HTTPX AsyncClient instance for all HTTP requests.
 httpx_client = httpx.AsyncClient(http2=True)
 
+# Global dictionary to store conversation nodes.
 msg_nodes = {}
 last_task_time = None
 
 def truncate_base64(base64_string, max_length=50):
-    """Truncates a base64 string for logging purposes."""
+    """Truncate a base64 string for logging purposes to avoid extremely long logs."""
     if len(base64_string) > max_length:
         return base64_string[:max_length] + "..."
     return base64_string
 
 @discord_client.event
 async def on_message(new_msg):
+    """
+    Discord event handler called when a new message is received.
+    This handler:
+      - Validates if the message is meant for the bot.
+      - Processes attachments and text.
+      - Augments the conversation using search APIs when needed.
+      - Invokes the chosen LLM with the assembled prompt.
+      - Streams the results back into Discord messages.
+    """
     global msg_nodes, last_task_time, httpx_client
 
     is_dm = new_msg.channel.type == discord.ChannelType.private
 
+    # Pattern to ignore if someone types "at ai" in text.
     at_ai_pattern = r'\bat ai\b'
 
     if (
@@ -337,10 +440,12 @@ async def on_message(new_msg):
     ) or new_msg.author.bot:
         return
 
+    # Remove bot-mention text and leading whitespace.
     content_without_at_ai = re.sub(at_ai_pattern, '', new_msg.content, flags=re.IGNORECASE)
     content_without_mentions = content_without_at_ai.replace(discord_client.user.mention, '').lstrip()
     new_msg.content = content_without_mentions
 
+    # Reload configuration in case of hot reloading.
     cfg = get_config()
 
     allow_dms = cfg["allow_dms"]
@@ -348,6 +453,7 @@ async def on_message(new_msg):
     allowed_role_ids = cfg["allowed_role_ids"]
     blocked_user_ids = cfg["blocked_user_ids"]
 
+    # Gather channel identifiers to enforce channel/role restrictions.
     channel_ids = tuple(
         id
         for id in (
@@ -381,10 +487,12 @@ async def on_message(new_msg):
     )
 
     try:
+        # Get API key for the main provider.
         api_key = await api_key_manager.get_next_api_key(cfg["provider"])
         if not api_key:
             api_key = 'sk-no-key-required'
 
+        # Determine if images and usernames are allowed based on model/provider.
         accept_images = any(x in cfg["model"].lower() for x in VISION_MODEL_TAGS)
         accept_usernames = any(x in cfg["provider"].lower() for x in PROVIDERS_SUPPORTING_USERNAMES)
 
@@ -405,6 +513,7 @@ async def on_message(new_msg):
 
             async with curr_node.lock:
                 if curr_node.text is None:
+                    # Filter attachments that match allowed file types.
                     good_attachments = {
                         type: [
                             att
@@ -414,6 +523,7 @@ async def on_message(new_msg):
                         for type in ALLOWED_FILE_TYPES
                     }
 
+                    # Assemble textual content from message text and attached files.
                     curr_node.text = "\n".join(
                         ([curr_msg.content] if curr_msg.content else []) +
                         [embed.description for embed in curr_msg.embeds if embed.description] +
@@ -423,11 +533,13 @@ async def on_message(new_msg):
                         ]
                     )
 
+                    # Remove a leading bot mention if present.
                     if curr_node.text.startswith(discord_client.user.mention):
                         curr_node.text = curr_node.text.replace(
                             discord_client.user.mention, "", 1
                         ).lstrip()
 
+                    # Process image attachments into base64 strings.
                     curr_node.images = [
                         dict(
                             type="image_url",
@@ -438,6 +550,7 @@ async def on_message(new_msg):
                         for att in good_attachments["image"]
                     ]
 
+                    # Determine role based on message sender.
                     curr_node.role = (
                         "assistant" if curr_msg.author == discord_client.user else "user"
                     )
@@ -451,6 +564,7 @@ async def on_message(new_msg):
                     )
 
                     try:
+                        # Determine the next message in the conversation chain.
                         if (
                             not curr_msg.reference
                             and discord_client.user.mention not in curr_msg.content
@@ -512,6 +626,7 @@ async def on_message(new_msg):
                         logging.exception("Error fetching next message in the chain")
                         curr_node.fetch_next_failed = True
 
+                # Prepare content to send based on text and image limits.
                 if curr_node.images[:max_images]:
                     content = (
                         ([dict(type="text", text=curr_node.text[:max_text])]
@@ -533,6 +648,7 @@ async def on_message(new_msg):
 
                     messages.append(message)
 
+                # Check for warnings due to text length, image count, unsupported files, or truncated chain.
                 if len(curr_node.text) > max_text:
                     user_warnings.add(f"⚠️ Max {max_text:,} characters per message")
                 if len(curr_node.images) > max_images:
@@ -558,6 +674,7 @@ async def on_message(new_msg):
             f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}"
         )
 
+        # Prepend system prompt with additional details if configured.
         if system_prompt := cfg["system_prompt"]:
             system_prompt_extras = [f"Today's date: {dt.now().strftime('%B %d, %Y')}."]
             if accept_usernames:
@@ -572,6 +689,7 @@ async def on_message(new_msg):
 
         user_message_content = new_msg.content
 
+        # Check if the query is a command to run lens or saucenao searches.
         if user_message_content.lower().startswith(('lens', 'sauce')):
             is_lens = user_message_content.lower().startswith('lens')
             prefix_len = len('lens') if is_lens else len('sauce')
@@ -602,6 +720,7 @@ async def on_message(new_msg):
                 await progress_message.edit(content=f"Error calling {service_name} API: {e}", allowed_mentions=allowed_mentions)
                 return
 
+            # Augment the user query with the visual search results.
             augmented_user_message = (
                 f'<user_query>\n{html.escape(user_message_content)}\n</user_query>\n\n'
                 f'<{results_tag}>\n{formatted_results}\n</{results_tag}>'
@@ -644,6 +763,7 @@ async def on_message(new_msg):
                 is_url_query = True
 
             if not is_url_query:
+                # Rephrase query before splitting it; if rephrasing is not needed, the returned string will be 'not_needed'
                 latest_user_query = await rephrase_query(messages, cfg, api_key_manager)
                 if latest_user_query != 'not_needed':
                     split_queries = await split_query(latest_user_query, cfg, api_key_manager)
@@ -736,6 +856,7 @@ async def on_message(new_msg):
                 }                
             ]
 
+        # Prepare a logging-friendly version of the payload.
         logging_kwargs = json.loads(json.dumps(kwargs, default=str))
         for message in logging_kwargs.get('messages', []):
             if isinstance(message.get('content'), list):
@@ -749,141 +870,125 @@ async def on_message(new_msg):
             f"Payload being sent to LLM API:\n{json.dumps(logging_kwargs, indent=2, default=str)}"
         )
         
-        # ----- RETRY LOGIC FOR MAIN MODEL CALL -----
-        max_retries = 3
+        # ----- RETRY LOGIC FOR MAIN MODEL CALL INCLUDING STREAMING -----
+        max_retries = 5
         attempt = 0
-        response_stream = None
-        while attempt < max_retries:
+        stream_successful = False
+        while attempt < max_retries and not stream_successful:
             try:
+                if attempt > 0:
+                    kwargs["api_key"] = await api_key_manager.get_next_api_key(cfg["provider"])
                 logging.info(f"Attempt {attempt+1} for main model using API key: {kwargs['api_key']}")
+        
                 response_stream = await litellm_acompletion(**kwargs)
-                break
-            except Exception as e:
-                logging.exception("Error in main model prompt, retrying with new API key. Attempt %d/%d", attempt+1, max_retries)
-                kwargs["api_key"] = await api_key_manager.get_next_api_key(cfg["provider"])
-                attempt += 1
+                # Process streaming chunks within this try/except block.
+                prev_chunk = None
+                async for curr_chunk in response_stream:
+                    prev_content = (prev_chunk.choices[0].delta.content
+                                    if (prev_chunk is not None and prev_chunk.choices[0].delta.content)
+                                    else "")
+                    curr_content = curr_chunk.choices[0].delta.content or ""
+                    
+                    if response_contents or prev_content:
+                        if response_contents == [] or len(response_contents[-1] + prev_content) > max_message_length:
+                            response_contents.append("")
+                            if not searched_for_text_added and searched_for_text:
+                                response_contents[-1] = searched_for_text
+                                searched_for_text_added = True
 
-        if response_stream is None:
-            await progress_message.edit(content="An error occurred while processing your request.", allowed_mentions=allowed_mentions)
-            return
+                            if not use_plain_responses:
+                                embed = discord.Embed(
+                                    description=(response_contents[-1] + prev_content + STREAMING_INDICATOR),
+                                    color=EMBED_COLOR_INCOMPLETE,
+                                )
+                                for warning in sorted(user_warnings):
+                                    embed.add_field(name=warning, value="", inline=False)
+                                footer_text = f"Model: {cfg['model']} | " + (
+                                    "Internet used" if msg_nodes[new_msg.id].internet_used else "Internet NOT used"
+                                )
+                                embed.set_footer(text=footer_text)
+
+                                view = OutputView(response_contents, user_message_content, serper_queries)
+
+                                if response_msgs == []:
+                                    response_msg = await progress_message.edit(
+                                        content=None, embed=embed, view=view, allowed_mentions=allowed_mentions
+                                    )
+                                    msg_nodes[response_msg.id] = MsgNode(
+                                        next_msg=new_msg,
+                                        internet_used=msg_nodes[new_msg.id].internet_used,
+                                    )
+                                    await msg_nodes[response_msg.id].lock.acquire()
+                                    response_msgs.append(response_msg)
+                                    last_task_time = dt.now().timestamp()
+                                else:
+                                    reply_to_msg = response_msgs[-1]
+                                    response_msg = await reply_to_msg.reply(
+                                        embed=embed, view=view, mention_author=False, allowed_mentions=allowed_mentions
+                                    )
+                                    msg_nodes[response_msg.id] = MsgNode(
+                                        next_msg=new_msg,
+                                        internet_used=msg_nodes[new_msg.id].internet_used,
+                                    )
+                                    await msg_nodes[response_msg.id].lock.acquire()
+                                    response_msgs.append(response_msg)
+                                    last_task_time = dt.now().timestamp()
+
+                        response_contents[-1] += prev_content
+
+                        if not use_plain_responses:
+                            finish_reason = curr_chunk.choices[0].finish_reason
+
+                            ready_to_edit = (
+                                (edit_task is None or edit_task.done())
+                                and dt.now().timestamp() - last_task_time >= EDIT_DELAY_SECONDS
+                            )
+                            msg_split_incoming = len(response_contents[-1] + curr_content) > max_message_length
+                            is_final_edit = finish_reason is not None or msg_split_incoming
+                            is_good_finish = finish_reason is not None and any(
+                                finish_reason.lower() == x for x in ("stop", "end_turn")
+                            )
+
+                            if ready_to_edit or is_final_edit:
+                                if edit_task is not None:
+                                    await edit_task
+
+                                embed.description = (
+                                    response_contents[-1]
+                                    if is_final_edit
+                                    else (response_contents[-1] + STREAMING_INDICATOR)
+                                )
+                                embed.color = (
+                                    EMBED_COLOR_COMPLETE
+                                    if msg_split_incoming or is_good_finish
+                                    else EMBED_COLOR_INCOMPLETE
+                                )
+                                footer_text = f"Model: {cfg['model']} | " + (
+                                    "Internet used" if msg_nodes[new_msg.id].internet_used else "Internet NOT used"
+                                )
+                                embed.set_footer(text=footer_text)
+
+                                edit_task = asyncio.create_task(
+                                    response_msgs[-1].edit(embed=embed, view=view, allowed_mentions=allowed_mentions)
+                                )
+                                last_task_time = dt.now().timestamp()
+
+                    prev_chunk = curr_chunk
+
+                # If the async for loop completes without error, the streaming was successful.
+                stream_successful = True
+            except Exception as e:
+                logging.exception("Error during streaming iteration, retrying with new API key. Attempt %d/%d", attempt+1, max_retries)
+                attempt += 1
+                if attempt >= max_retries:
+                    await progress_message.edit(content="An error occurred while processing your request (rate limit exceeded).", allowed_mentions=allowed_mentions)
+                    return
+                # Otherwise, continue to retry the entire call and streaming iteration.
         # ----- END RETRY LOGIC -----
 
         try:
-            async for curr_chunk in response_stream:
-                prev_content = (
-                    prev_chunk.choices[0].delta.content
-                    if prev_chunk is not None and prev_chunk.choices[0].delta.content
-                    else ""
-                )
-                curr_content = curr_chunk.choices[0].delta.content or ""
-
-                if response_contents or prev_content:
-                    if response_contents == [] or len(
-                        response_contents[-1] + prev_content
-                    ) > max_message_length:
-                        response_contents.append("")
-
-                        if not searched_for_text_added and searched_for_text:
-                            response_contents[-1] = searched_for_text
-                            searched_for_text_added = True
-
-                        if not use_plain_responses:
-                            embed = discord.Embed(
-                                description=(
-                                    response_contents[-1]
-                                    + prev_content
-                                    + STREAMING_INDICATOR
-                                ),
-                                color=EMBED_COLOR_INCOMPLETE,
-                            )
-                            for warning in sorted(user_warnings):
-                                embed.add_field(name=warning, value="", inline=False)
-                            footer_text = f"Model: {cfg['model']} | " + (
-                                "Internet used"
-                                if msg_nodes[new_msg.id].internet_used
-                                else "Internet NOT used"
-                            )
-                            embed.set_footer(text=footer_text)
-
-                            view = OutputView(response_contents, user_message_content, serper_queries)
-
-                            if response_msgs == []:
-                                response_msg = await progress_message.edit(
-                                    content=None, embed=embed, view=view, allowed_mentions=allowed_mentions
-                                )
-                                msg_nodes[response_msg.id] = MsgNode(
-                                    next_msg=new_msg,
-                                    internet_used=msg_nodes[
-                                        new_msg.id
-                                    ].internet_used,
-                                )
-                                await msg_nodes[response_msg.id].lock.acquire()
-                                response_msgs.append(response_msg)
-                                last_task_time = dt.now().timestamp()
-                            else:
-                                reply_to_msg = response_msgs[-1]
-                                response_msg = await reply_to_msg.reply(
-                                    embed=embed, view=view, mention_author=False, allowed_mentions=allowed_mentions
-                                )
-                                msg_nodes[response_msg.id] = MsgNode(
-                                    next_msg=new_msg,
-                                    internet_used=msg_nodes[
-                                        new_msg.id
-                                    ].internet_used,
-                                )
-                                await msg_nodes[response_msg.id].lock.acquire()
-                                response_msgs.append(response_msg)
-                                last_task_time = dt.now().timestamp()
-
-                    response_contents[-1] += prev_content
-
-                    if not use_plain_responses:
-                        finish_reason = curr_chunk.choices[0].finish_reason
-
-                        ready_to_edit = (
-                            (edit_task is None or edit_task.done())
-                            and dt.now().timestamp() - last_task_time
-                            >= EDIT_DELAY_SECONDS
-                        )
-                        msg_split_incoming = len(
-                            response_contents[-1] + curr_content
-                        ) > max_message_length
-                        is_final_edit = finish_reason is not None or msg_split_incoming
-                        is_good_finish = finish_reason is not None and any(
-                            finish_reason.lower() == x for x in ("stop", "end_turn")
-                        )
-
-                        if ready_to_edit or is_final_edit:
-                            if edit_task is not None:
-                                await edit_task
-
-                            embed.description = (
-                                response_contents[-1]
-                                if is_final_edit
-                                else (response_contents[-1] + STREAMING_INDICATOR)
-                            )
-                            embed.color = (
-                                EMBED_COLOR_COMPLETE
-                                if msg_split_incoming or is_good_finish
-                                else EMBED_COLOR_INCOMPLETE
-                            )
-                            footer_text = f"Model: {cfg['model']} | " + (
-                                "Internet used"
-                                if msg_nodes[new_msg.id].internet_used
-                                else "Internet NOT used"
-                            )
-                            embed.set_footer(text=footer_text)
-
-                            edit_task = asyncio.create_task(
-                                response_msgs[-1].edit(embed=embed, view=view, allowed_mentions=allowed_mentions)
-                            )
-                            last_task_time = dt.now().timestamp()
-
-                prev_chunk = curr_chunk
-
             if use_plain_responses:
                 view = OutputView(response_contents, user_message_content, serper_queries)
-
                 for content in response_contents:
                     if response_msgs == []:
                         response_msg = await progress_message.edit(
@@ -904,10 +1009,12 @@ async def on_message(new_msg):
             logging.exception("Error while generating response")
             await progress_message.edit(content="An error occurred while processing your request.", allowed_mentions=allowed_mentions)
 
+        # Release locks for each response message node.
         for response_msg in response_msgs:
             msg_nodes[response_msg.id].text = "".join(response_contents)
             msg_nodes[response_msg.id].lock.release()
 
+        # Maintain the global message dictionary within a maximum size.
         if (num_nodes := len(msg_nodes)) > MAX_MESSAGE_NODES:
             for msg_id in sorted(msg_nodes.keys())[: num_nodes - MAX_MESSAGE_NODES]:
                 async with msg_nodes.setdefault(msg_id, MsgNode()).lock:
@@ -915,6 +1022,7 @@ async def on_message(new_msg):
 
         user_msg_node = msg_nodes.get(new_msg.id)
         if user_msg_node and user_msg_node.serper_queries:
+            # Launch background image fetching and view updating.
             asyncio.create_task(
                 fetch_images_and_update_views(
                     user_msg_node.serper_queries,
@@ -931,9 +1039,13 @@ async def on_message(new_msg):
         return
 
 async def main():
+    """
+    Main coroutine to start the Discord client and handle shutdown gracefully.
+    """
     try:
         await discord_client.start(cfg["bot_token"])
     finally:
         await httpx_client.aclose()
 
+# Run the main function.
 asyncio.run(main())

@@ -1,3 +1,11 @@
+"""
+Query Splitter Handler Module
+
+This module defines a function to detect whether a query involves comparisons
+and to split queries accordingly. It uses an LLM call to generate a JSON array
+of query strings.
+"""
+
 import logging
 import json
 import re
@@ -8,6 +16,21 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 async def split_query(query, cfg, api_key_manager):
+    """
+    Split an input query into multiple queries when it implies a comparison.
+
+    The prompt instructs the model to:
+      - If a comparison exists, return multiple queries including the original.
+      - Otherwise, simply return the original query in a JSON array.
+      
+    Args:
+        query (str): The original user query.
+        cfg (dict): Configuration options.
+        api_key_manager: API key manager instance.
+        
+    Returns:
+        list: A list of queries (strings) as parsed from the model's JSON output.
+    """
     query_splitter_prompt = '''Your task is to determine if the query implies a comparison between multiple entities.
 
 If it does, decompose it into separate queries focusing on each entity, along with the original comparison query.
@@ -52,6 +75,7 @@ Output:
     if not api_key:
         api_key = 'sk-no-key-required'
 
+    # Build messages for the LLM API
     messages = [
         {"role": "system", "content": "You are a concise assistant."},
         {"role": "user", "content": formatted_prompt}
@@ -101,7 +125,7 @@ Output:
     logger.info(f"Payload being sent to LLM API for query_splitter:\n{json.dumps(logging_kwargs, indent=2, default=str)}")
 
     # ---- RETRY LOOP FOR QUERY SPLITTER CALL ----
-    max_retries = 3
+    max_retries = 5
     response = None
     for i in range(max_retries):
         try:
@@ -137,7 +161,7 @@ Output:
         return [query]
 
 def truncate_base64(base64_string, max_length=50):
-    """Utility function used for logging purposes."""
+    """Utility function to truncate long base64 strings for logging purposes."""
     if len(base64_string) > max_length:
         return base64_string[:max_length] + "..."
     return base64_string

@@ -1,6 +1,8 @@
 """
-Configuration module for SearxNG integration.
-Handles loading and validating SearxNG-related configuration.
+SearxNG Configuration Module
+
+Loads SearxNG settings from environment variables, handling any comments in the string values.
+It returns a dictionary used for constructing SearxNG API URLs.
 """
 
 import os
@@ -11,25 +13,28 @@ logger = logging.getLogger(__name__)
 
 def get_searxng_config(env_vars: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Get SearxNG configuration from environment variables or config file.
-    
+    Get SearxNG configuration from environment variables.
+
     Args:
-        env_vars (Optional[Dict[str, Any]]): Environment variables dictionary for testing
+        env_vars (dict, optional): A dictionary of environment variables (for testing).
         
     Returns:
-        Dict[str, Any]: SearxNG configuration dictionary
+        dict: A dictionary containing SearxNG configuration options.
     """
     if env_vars is None:
         env_vars = os.environ
         
     def parse_value_with_comments(value_str: str, convert_func, default_value: Any, value_name: str) -> Any:
-        """Parse a value, handling potential comments in the string.
+        """Parse a value from a string, ignoring any in-line comments.
         
         Args:
-            value_str: The string to parse
-            convert_func: Function to convert the string to desired type (e.g., int, float)
-            default_value: Default value to return if parsing fails
-            value_name: Name of the value for logging purposes
+            value_str (str): The raw value string.
+            convert_func (callable): Conversion function (int, float, etc.).
+            default_value (Any): Value to use if conversion fails.
+            value_name (str): Name of the setting (for logging).
+            
+        Returns:
+            Any: The converted value.
         """
         value_str = value_str.split('#')[0].strip()
         try:
@@ -50,22 +55,19 @@ def get_searxng_config(env_vars: Optional[Dict[str, Any]] = None) -> Dict[str, A
     
     if not config['base_url'].startswith(('http://', 'https://')):
         logger.warning(
-            f"Invalid SearxNG base URL: {config['base_url']}. "
-            "URL should start with http:// or https://"
+            f"Invalid SearxNG base URL: {config['base_url']}. URL should start with http:// or https://"
         )
         config['base_url'] = 'http://localhost:4000'
     
     if not isinstance(config['timeout'], (int, float)) or config['timeout'] <= 0:
         logger.warning(
-            f"Invalid SearxNG timeout: {config['timeout']}. "
-            "Using default value of 30.0 seconds"
+            f"Invalid SearxNG timeout: {config['timeout']}. Using default value of 30.0 seconds"
         )
         config['timeout'] = 30.0
     
     if not isinstance(config['safe_search'], int) or config['safe_search'] not in (0, 1, 2):
         logger.warning(
-            f"Invalid SearxNG safe_search value: {config['safe_search']}. "
-            "Using default value of 1 (moderate)"
+            f"Invalid SearxNG safe_search value: {config['safe_search']}. Using default value of 1 (moderate)"
         )
         config['safe_search'] = 1
     

@@ -1,3 +1,13 @@
+"""
+URL Handler Module
+
+This module is responsible for:
+  - Extracting URLs from text using regex.
+  - Wrapping text content in XML tags.
+  - Fetching content from URLs (e.g., web pages, PDFs, YouTube, Reddit)
+    and converting them into XML–formatted strings.
+"""
+
 import asyncio
 import re
 import html
@@ -9,22 +19,52 @@ from PyPDF2 import PdfReader
 from io import BytesIO
 
 def extract_urls_from_text(text):
-    """Extract URLs from text using regex pattern."""
+    """
+    Extract URLs from the provided text using a regex pattern.
+    
+    Args:
+        text (str): Input text.
+    
+    Returns:
+        list: A list of URLs found.
+    """
     url_pattern = re.compile(r'(https?://\S+)')
     urls = re.findall(url_pattern, text)
     return urls
 
 def wrap_text_content(text):
-    """Wraps plain text content in XML tags with type information."""
+    """
+    Wrap plain text in XML tags for structured output.
+    
+    Args:
+        text (str): Text to wrap.
+    
+    Returns:
+        str: XML string containing the text.
+    """
     return f'<text_content>\n{html.escape(text)}\n</text_content>'
 
 async def fetch_urls_content(urls, api_key_manager, httpx_client, config=None):
-    """Fetch and process content from a list of URLs with XML wrapping."""
+    """
+    For each URL in the list, fetch its content and wrap it in XML tags.
+    Handles special URLs like YouTube and Reddit differently.
+
+    Args:
+        urls (list): List of URLs.
+        api_key_manager: API key manager.
+        httpx_client (httpx.AsyncClient): HTTP client.
+        config (dict, optional): Configuration dictionary.
+
+    Returns:
+        list: List of XML-formatted content strings.
+    """
     if config is None:
         config = {}
 
     async def fetch_and_convert(url):
-        """Fetch and convert content from a single URL with appropriate XML tags."""
+        """
+        Fetch content from a single URL and convert according to its type.
+        """
         if 'youtube.com' in url or 'youtu.be' in url:
             content = await fetch_youtube_content(url, api_key_manager, httpx_client)
             return f'<youtube_content>\n{content}\n</youtube_content>'

@@ -1,5 +1,9 @@
 """
-Modified image handler that uses SearxNG with Serper fallback.
+Image Handler Module
+
+Modified image handler that uses SearxNG with a fallback via Serper.
+This module fetches images based on search queries, downloads them and
+returns Discord File objects together with any URLs that failed to download.
 """
 
 import asyncio
@@ -9,8 +13,10 @@ import httpx
 from discord import File
 from io import BytesIO
 
+# Import download functionality from searxng_image_handler
 from searxng_image_handler import download_image
 
+# Setup logging for this module.
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
@@ -21,30 +27,34 @@ async def fetch_images_from_serper(
     httpx_client: httpx.AsyncClient
 ) -> Tuple[List[File], List[str]]:
     """
-    Fetches images from Serper API using GET requests with query parameters.
-    Used as fallback when SearxNG fails.
-    
+    Fetches images using the Serper image search API. This is used as a fallback
+    if the main image search via SearxNG fails.
+
     Args:
-        queries (List[str]): List of search queries
-        num_images (int): Number of images to fetch per query
-        api_key_manager: API key manager instance
-        httpx_client (httpx.AsyncClient): HTTP client
-        
+        queries (List[str]): List of search queries.
+        num_images (int): Number of images to attempt to fetch per query.
+        api_key_manager: Instance managing API keys.
+        httpx_client (httpx.AsyncClient): HTTP client for making requests.
+
     Returns:
-        Tuple[List[File], List[str]]: List of image files and list of failed image URLs
+        Tuple[List[File], List[str]]:
+            - A list of Discord File objects for the successfully downloaded images.
+            - A list of URLs for which image downloading failed.
     """
     image_files = []
     image_urls = []
     
     for query in queries:
+        # Get the API key for Serper.
         api_key = await api_key_manager.get_next_api_key('serper')
         if not api_key:
             logger.warning("No Serper API key available.")
             continue
 
+        # Configure query parameters for the API request.
         params = {
             'q': query,
-            'num': num_images * 2,
+            'num': num_images * 2,  # request extra to allow for failures
             'type': 'images',
             'autocorrect': 'false',
             'apiKey': api_key
@@ -59,6 +69,7 @@ async def fetch_images_from_serper(
             response.raise_for_status()
             data = response.json()
 
+            # Gather source URLs (could be used later for error reporting)
             source_urls = {}
             for image in data.get('images', []):
                 source_urls[image.get('sourceUrl')] = image.get('imageUrl')
@@ -66,6 +77,7 @@ async def fetch_images_from_serper(
             image_tasks = []
             urls_to_try = []
 
+            # Queue tasks to download images.
             for image in data.get('images', [])[:num_images * 2]:
                 image_url = image.get('imageUrl')
                 source_url = image.get('sourceUrl')
@@ -88,6 +100,7 @@ async def fetch_images_from_serper(
                         image_urls.append(urls_to_try[idx])
                 else:
                     if successful_downloads < num_images:
+                        # Wrap image bytes into a Discord File object.
                         image_file = File(BytesIO(image_data), filename=f"image_{len(image_files) + 1}.png")
                         image_files.append(image_file)
                         successful_downloads += 1

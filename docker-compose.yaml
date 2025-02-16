@@ -1,3 +1,5 @@
+# Docker Compose configuration for the container.
+# The container is built from the Dockerfile in the current directory.
 services:
   container:
     build: .

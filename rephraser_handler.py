@@ -1,3 +1,10 @@
+"""
+Rephraser Handler Module
+
+This module provides a function to decide whether to rephrase the user's query for web search.
+It calls an LLM with detailed instructions and returns either a rephrased query or 'not_needed'.
+"""
+
 import logging
 import json
 import re
@@ -9,12 +16,24 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 def truncate_base64(base64_string, max_length=50):
-    """Truncates a base64 string for logging purposes."""
+    """Truncate a base64 string to a maximum length for logging."""
     if len(base64_string) > max_length:
         return base64_string[:max_length] + "..."
     return base64_string
 
 async def rephrase_query(messages, cfg, api_key_manager):
+    """
+    Determine whether the user's query needs rephrasing for a web search,
+    and return the rephrased query or 'not_needed'.
+
+    Args:
+        messages (list): The conversation messages.
+        cfg (dict): Configuration settings.
+        api_key_manager: API key manager instance.
+
+    Returns:
+        str: The rephrased query or "not_needed".
+    """
     latest_user_msg = None
     for msg in reversed(messages):
         if msg['role'] == 'user':
@@ -37,8 +56,10 @@ async def rephrase_query(messages, cfg, api_key_manager):
             logger.info("Text file detected in message, skipping rephrasing")
             return 'not_needed'
 
+    # Copy messages to avoid modifying the original conversation context.
     rephraser_messages = [dict(m) for m in messages]
 
+    # Rephraser instructions are provided in detail.
     rephraser_instruction = cfg.get('rephraser_instruction')
     if not rephraser_instruction:
         rephraser_instruction = '''You are {{Riley}}, an AI query rephraser. Your sole objective is to assist {{user}} by deciding whether a query must be rephrased to perform a web search, and then outputting the rephrased query in the proper format. Under no circumstances should you include a web search prompt if the query clearly relates to general factual, timeless, or internally solvable questions.
@@ -142,25 +163,6 @@ Explanation: The query "latest news" requires current, up-to-date info so a web 
 
 --------------------------------------------------
 
-Chat History Integration:
-• If the latest query is a follow-up to a previous one, reuse the context to form a complete and self-contained query.
-• For very short follow-ups, explicitly link them to the prior topic to maintain clarity.
-
---------------------------------------------------
-
-Output Format:
-• If a web search is required (by meeting any of the strict conditions above), return the rephrased query in the following format:
-  <latest_user_query>
-  …rephrased query…
-  </latest_user_query>
- 
-• If no web search is required, output:
-  <latest_user_query>
-  not_needed
-  </latest_user_query>
-
---------------------------------------------------
-
 Always output your final response within the <latest_user_query> tags exactly as specified.'''
 
     latest_user_idx = None
@@ -170,6 +172,7 @@ Always output your final response within the <latest_user_query> tags exactly as
             break
 
     if latest_user_idx is not None:
+        # Prepend a label with a timestamp to all user messages.
         for idx, msg in enumerate(rephraser_messages):
             if msg['role'] == 'user':
                 timestamp_str = msg.get('timestamp')
@@ -197,6 +200,7 @@ Always output your final response within the <latest_user_query> tags exactly as
                 elif isinstance(msg['content'], str):
                     msg['content'] = label + msg['content']
 
+    # Prepend each user message with the rephraser instruction (only for the latest user message).
     for i in range(len(rephraser_messages) - 1, -1, -1):
         if rephraser_messages[i]['role'] == 'user':
             original_content = rephraser_messages[i]['content']
@@ -247,7 +251,7 @@ Always output your final response within the <latest_user_query> tags exactly as
         ]
 
     # ---- RETRY LOOP FOR REPHRASER CALL ----
-    max_retries = 3
+    max_retries = 5
     response = None
     for i in range(max_retries):
         try:
