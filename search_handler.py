@@ -1,8 +1,8 @@
 """
 Search Handler Module
 
-Delegates search queries to the SearchService and then wraps the results (and any errors)
-in a structured XML format. Also supports fetching URL content from the search results.
+Delegates search queries to the SearchService and then wraps the results
+(and any errors) in a structured plain text format.
 """
 
 import logging
@@ -15,9 +15,10 @@ from url_handler import fetch_urls_content
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+
 async def handle_search_query(query: str, api_key_manager, httpx_client: httpx.AsyncClient, config: Optional[Dict[str, Any]] = None) -> str:
     """
-    Perform a search using multiple providers with fallback logic, and combine the results into XML.
+    Perform a search using multiple providers with fallback logic, and combine the results into plain text.
 
     Args:
         query (str): The search query.
@@ -26,7 +27,7 @@ async def handle_search_query(query: str, api_key_manager, httpx_client: httpx.A
         config (dict, optional): Additional configuration options.
 
     Returns:
-        str: An XML string containing search results.
+        str: A plain text string containing search results.
     """
     if config is None:
         config = {}
@@ -36,34 +37,27 @@ async def handle_search_query(query: str, api_key_manager, httpx_client: httpx.A
     
     results, errors = await search_service.search(query, max_urls)
     
-    xml_parts = ['<search_results>']
-    
+    lines = []
     if errors:
-        xml_parts.append('<error_messages>')
+        lines.append("Error Messages:")
         for error in errors:
-            xml_parts.append(f'<search_error>{error}</search_error>')
-        xml_parts.append('</error_messages>')
-    
+            lines.append(f" - {error}")
+        lines.append("")
     if not results:
-        xml_parts.append('<search_error>No results found from any provider</search_error>')
-        xml_parts.append('</search_results>')
-        return '\n'.join(xml_parts)
+        lines.append("No search results found from any provider.")
+        return "\n".join(lines)
     
     # Extract the URLs from the search results and fetch their page content.
     url_list = [result.url for result in results]
     contents = await fetch_urls_content(url_list, api_key_manager, httpx_client, config=config)
     
+    lines.append("Search Results:")
     for idx, (result, content) in enumerate(zip(results, contents), start=1):
-        xml_parts.extend([
-            f'<search_result id="{idx}">',
-            '<metadata>',
-            f'<url>{result.url}</url>',
-            f'<title>{result.title}</title>',
-            f'<snippet>{result.snippet}</snippet>',
-            '</metadata>',
-            f'<content>{content}</content>',
-            '</search_result>'
-        ])
-    
-    xml_parts.append('</search_results>')
-    return '\n'.join(xml_parts)
+        lines.append(f"Result {idx}:")
+        lines.append(f"  URL: {result.url}")
+        lines.append(f"  Title: {result.title}")
+        lines.append(f"  Snippet: {result.snippet}")
+        lines.append("  Fetched Content:")
+        lines.append(content)
+        lines.append("")
+    return "\n".join(lines)

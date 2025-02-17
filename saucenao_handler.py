@@ -2,7 +2,7 @@
 SauceNAO Handler Module
 
 Provides functionality to perform a SauceNAO image source lookup using its API.
-It downloads the given image, sends it to the SauceNAO API, and formats the results in XML.
+It downloads the given image, sends it to the SauceNAO API, and formats the results in plain text.
 """
 
 import logging
@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
 SAUCENAO_API_URL = "https://saucenao.com/search.php"
+
 
 async def handle_saucenao_query(
     image_url: str,
@@ -32,7 +33,7 @@ async def handle_saucenao_query(
         min_similarity (float): Minimum similarity threshold to consider (default: 50.0).
 
     Returns:
-        str: XML-formatted results from SauceNAO.
+        str: Plain text–formatted results from SauceNAO.
     """
     try:
         # Download the image to send to SauceNAO.
@@ -40,17 +41,17 @@ async def handle_saucenao_query(
         image_response.raise_for_status()
         image_data = image_response.content
         
-        # Prepare multipart file upload.
+        # Prepare multipart upload.
         files = {
             'file': ('image.png', image_data, 'image/png')
         }
         
         params = {
-            'output_type': 2,  
+            'output_type': 2,
             'api_key': api_key,
-            'numres': 16,  
-            'db': 999,  
-            'dedupe': 2  
+            'numres': 16,
+            'db': 999,
+            'dedupe': 2
         }
         
         response = await httpx_client.post(
@@ -62,63 +63,46 @@ async def handle_saucenao_query(
         response.raise_for_status()
         data = response.json()
         
-        xml_parts = ['<saucenao_results>']
-        
+        lines = []
         header = data.get('header', {})
-        xml_parts.extend([
-            '<header>',
-            f'<user_id>{header.get("user_id", "")}</user_id>',
-            f'<account_type>{header.get("account_type", "")}</account_type>',
-            f'<short_limit>{header.get("short_limit", "")}</short_limit>',
-            f'<long_limit>{header.get("long_limit", "")}</long_limit>',
-            f'<long_remaining>{header.get("long_remaining", "")}</long_remaining>',
-            f'<short_remaining>{header.get("short_remaining", "")}</short_remaining>',
-            f'<minimum_similarity>{header.get("minimum_similarity", "")}</minimum_similarity>',
-            f'<query_image>{html.escape(header.get("query_image", ""))}</query_image>',
-            f'<results_returned>{header.get("results_returned", "")}</results_returned>',
-            '</header>'
-        ])
+        lines.append("SauceNAO Results:")
+        lines.append("Header:")
+        lines.append(f"  User ID: {header.get('user_id', '')}")
+        lines.append(f"  Account Type: {header.get('account_type', '')}")
+        lines.append(f"  Short Limit: {header.get('short_limit', '')}")
+        lines.append(f"  Long Limit: {header.get('long_limit', '')}")
+        lines.append(f"  Long Remaining: {header.get('long_remaining', '')}")
+        lines.append(f"  Short Remaining: {header.get('short_remaining', '')}")
+        lines.append(f"  Minimum Similarity: {header.get('minimum_similarity', '')}")
+        lines.append(f"  Query Image: {header.get('query_image', '')}")
+        lines.append(f"  Results Returned: {header.get('results_returned', '')}")
+        lines.append("")
         
         results = data.get('results', [])
         for result in results:
-            header = result.get('header', {})
-            data_obj = result.get('data', {})
-            
-            similarity = float(header.get('similarity', 0))
-            # Skip results with similarity below the threshold.
+            similarity = float(result.get('header', {}).get('similarity', 0))
             if similarity < min_similarity:
                 continue
-                
-            xml_parts.extend([
-                '<result>',
-                '<result_header>',
-                f'<similarity>{header.get("similarity", "")}</similarity>',
-                f'<thumbnail>{html.escape(header.get("thumbnail", ""))}</thumbnail>',
-                f'<index_id>{header.get("index_id", "")}</index_id>',
-                f'<index_name>{html.escape(header.get("index_name", ""))}</index_name>',
-                '</result_header>',
-                '<result_data>'
-            ])
-            
-            # Convert result data into XML elements.
-            for key, value in data_obj.items():
+            rheader = result.get('header', {})
+            rdata = result.get('data', {})
+            lines.append("Result:")
+            lines.append(f"  Similarity: {rheader.get('similarity', '')}")
+            lines.append(f"  Thumbnail: {rheader.get('thumbnail', '')}")
+            lines.append(f"  Index ID: {rheader.get('index_id', '')}")
+            lines.append(f"  Index Name: {rheader.get('index_name', '')}")
+            for key, value in rdata.items():
                 if isinstance(value, list):
-                    xml_parts.extend([
-                        f'<{key}>',
-                        '\n'.join(f'<item>{html.escape(str(item))}</item>' for item in value),
-                        f'</{key}>'
-                    ])
+                    lines.append(f"  {key.capitalize()}:")
+                    for item in value:
+                        lines.append(f"    - {item}")
                 else:
-                    xml_parts.append(f'<{key}>{html.escape(str(value))}</{key}>')
-            
-            xml_parts.extend(['</result_data>', '</result>'])
-        
-        xml_parts.append('</saucenao_results>')
-        return '\n'.join(xml_parts)
+                    lines.append(f"  {key.capitalize()}: {value}")
+            lines.append("")
+        return "\n".join(lines)
         
     except httpx.HTTPError as http_err:
         logger.error(f"HTTP error during SauceNAO request: {http_err}")
-        return f'<saucenao_results><error>HTTP error during SauceNAO request: {str(http_err)}</error></saucenao_results>'
+        return f"HTTP error during SauceNAO request: {str(http_err)}"
     except Exception as e:
         logger.error(f"Error processing SauceNAO request: {e}")
-        return f'<saucenao_results><error>Error processing SauceNAO request: {str(e)}</error></saucenao_results>'
+        return f"Error processing SauceNAO request: {str(e)}"
