@@ -21,7 +21,7 @@ from litellm import acompletion as litellm_acompletion
 from dotenv import load_dotenv
 import html
 
-from search_handler import handle_search_query
+from search_handler import handle_search_query, handle_search_queries
 from url_handler import extract_urls_from_text, fetch_urls_content
 from rephraser_handler import rephrase_query
 from query_splitter_handler import split_query
@@ -178,7 +178,7 @@ class OutputView(discord.ui.View):
         file = io.StringIO(full_content)
         await interaction.response.send_message(
             content="Here is the output as a text file:",
-            file=File(file, filename="output.txt"),
+            file=discord.File(file, filename="output.txt"),
             ephemeral=True
         )
 
@@ -608,24 +608,10 @@ async def on_message(new_msg):
                 latest_user_query = await rephrase_query(messages, cfg, api_key_manager)
                 if latest_user_query != 'not_needed':
                     split_queries = await split_query(latest_user_query, cfg, api_key_manager)
-                    serper_api_key = await api_key_manager.get_next_api_key('serper')
-                    if not serper_api_key:
-                        await progress_message.edit(content='No Serper API key available.', allowed_mentions=allowed_mentions)
-                        return
                     msg_nodes[new_msg.id].serper_queries = split_queries
                     msg_nodes[new_msg.id].internet_used = True
-                    search_results_list = await asyncio.gather(
-                        *[handle_search_query(q, api_key_manager, httpx_client, config=cfg) for q in split_queries]
-                    )
-                    search_results = (
-                        f"User Query: {html.escape(new_msg.content)}\n\n"
-                        f"Search Results by Query:\n"
-                    )
-                    for idx, (query, result) in enumerate(zip(split_queries, search_results_list), start=1):
-                        search_results += (
-                            f"Result {idx} for query '{html.escape(query)}':\n{result}\n\n"
-                        )
-                    augmented_user_message = search_results
+                    aggregated_results = await handle_search_queries(split_queries, api_key_manager, httpx_client, config=cfg)
+                    augmented_user_message = f"User Query: {html.escape(new_msg.content)}\n\nAggregated Search Results:\n{aggregated_results}"
             if augmented_user_message:
                 for message in reversed(messages):
                     if message['role'] == 'user':
