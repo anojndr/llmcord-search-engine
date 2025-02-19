@@ -7,7 +7,6 @@ and top comments via the YouTube API and YouTube Transcript API, and outputs a p
 
 import re
 import logging
-import random
 import os
 import html
 from urllib.parse import urlparse, parse_qs
@@ -19,70 +18,6 @@ from youtube_transcript_api import YouTubeTranscriptApi
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-
-
-def _find_proxies_file(filename="proxies.txt"):
-    """
-    Attempt to find a proxies file in the current directory or /etc/secrets.
-    
-    Returns:
-        str or None: Absolute path to the file if found, else None.
-    """
-    if os.path.exists(filename):
-        return os.path.abspath(filename)
-    alt_filename = os.path.join("/etc/secrets", filename)
-    if os.path.exists(alt_filename):
-        return alt_filename
-    return None
-    
-
-def load_proxies(filename="proxies.txt"):
-    """
-    Load proxy URLs from the specified file.
-    
-    Args:
-        filename (str): Name of the file containing proxies.
-    
-    Returns:
-        list: List of proxy URL strings.
-    """
-    filepath = _find_proxies_file(filename)
-    proxies = []
-    if filepath:
-        logger.info("Loading proxies from %s", filepath)
-        with open(filepath, 'r', encoding='utf-8') as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    if '@' not in line and ':' in line:
-                        parts = line.split(':')
-                        if len(parts) == 2:
-                            ip, port = parts
-                            proxy_url = f"http://{ip}:{port}"
-                        elif len(parts) == 4:
-                            ip, port, user, password = parts
-                            proxy_url = f"http://{user}:{password}@{ip}:{port}"
-                        else:
-                            continue
-                        proxies.append(proxy_url)
-                    else:
-                        proxies.append(line)
-    else:
-        logger.warning("No proxies file found.")
-    return proxies
-
-
-def get_random_proxy():
-    """
-    Randomly select and return a proxy URL from the list, if available.
-    
-    Returns:
-        str or None: Proxy URL string or None if no proxies are set.
-    """
-    proxies_list = load_proxies()
-    if not proxies_list:
-        return None
-    return random.choice(proxies_list)
 
 
 def extract_video_id(url):
@@ -152,7 +87,7 @@ async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments
     Args:
         url (str): YouTube video URL.
         api_key_manager: API key manager instance.
-        httpx_client (httpx.AsyncClient): HTTP client.
+        httpx_client: HTTP client.
         max_comments (int): Maximum number of comments to retrieve.
     
     Returns:
@@ -195,17 +130,9 @@ async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments
             'tags': ', '.join([html.unescape(tag) for tag in snippet.get('tags', [])])
         }
 
-        proxy_url = get_random_proxy()
+        # Fetch transcript without using any proxies
         try:
-            if proxy_url:
-                logger.info("Using proxy for YouTube Transcript API: %s", proxy_url)
-                transcripts = YouTubeTranscriptApi.list_transcripts(
-                    video_id,
-                    proxies={"https": proxy_url}
-                )
-            else:
-                transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
-
+            transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
             transcript = transcripts.find_transcript(['en']).fetch()
             captions = ' '.join(html.unescape(t['text']) for t in transcript)
         except Exception as e:
