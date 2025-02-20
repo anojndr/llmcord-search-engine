@@ -4,29 +4,17 @@ Google Lens Handler Module
 This module provides functionalities to search for visual matches in images via
 the Google Lens API (using SerpApi) and to process the results.
 
-It also handles fetching additional content for special URLs like YouTube and Reddit.
+It uses url_handler.py to fetch content from URLs.
 """
 
 import asyncio
 import logging
 import httpx
-from bs4 import BeautifulSoup, Comment
-
-# Import dedicated functions to handle YouTube and Reddit content extraction.
-from youtube_handler import fetch_youtube_content
-from reddit_handler import fetch_reddit_content
+from url_handler import fetch_urls_content
 
 # Set up logging for debugging purposes.
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
-
-def is_youtube_url(url):
-    """Check if the URL belongs to YouTube."""
-    return 'youtube.com' in url or 'youtu.be' in url
-
-def is_reddit_url(url):
-    """Check if the URL is from Reddit."""
-    return 'reddit.com' in url or 'redd.it' in url
 
 async def get_google_lens_results(image_url, api_key_manager, httpx_client, hl='en', country='us'):
     """
@@ -124,12 +112,12 @@ async def process_google_lens_results(results, config, api_key_manager, httpx_cl
 
 async def process_visual_match(idx, url, title, config, api_key_manager, httpx_client):
     """
-    Process a single visual match URL by fetching its content.
+    Process a single visual match URL by fetching its content using url_handler.
 
     Args:
         idx (int): The visual match number.
         url (str): URL of the visual match.
-        title (str): Title of the visual match.
+        title (str): Title of the visual match (unused in output formatting).
         config (dict): Configuration settings.
         api_key_manager (APIKeyManager): API key manager instance.
         httpx_client (httpx.AsyncClient): HTTP client for content fetching.
@@ -140,46 +128,9 @@ async def process_visual_match(idx, url, title, config, api_key_manager, httpx_c
     logger.debug("Starting process_visual_match #%d: %s", idx, url)
     content = ''
 
-    # Check if URL is a YouTube URL
-    if is_youtube_url(url):
-        logger.debug("Detected YouTube URL for match #%d: %s", idx, url)
-        content = await fetch_youtube_content(url, api_key_manager, httpx_client)
-    # Check if URL is a Reddit URL
-    elif is_reddit_url(url):
-        logger.debug("Detected Reddit URL for match #%d: %s", idx, url)
-        content = await fetch_reddit_content(url, api_key_manager, httpx_client)
-    else:
-        try:
-            # Attempt to download webpage content using HTTPX
-            response = await httpx_client.get(url, timeout=10.0, follow_redirects=True)
-            response.raise_for_status()
-            content_type = response.headers.get('Content-Type', '')
-
-            # For HTML content, use BeautifulSoup to clean it up
-            if 'text/html' in content_type:
-                html_content = response.text
-                soup = BeautifulSoup(html_content, 'lxml')
-                # Remove non-content elements
-                for tag in soup(['script', 'style', 'header', 'footer', 'nav', 'aside', 'form', 'svg', 'canvas']):
-                    tag.decompose()
-                # Remove HTML comments
-                for c in soup.find_all(text=lambda text: isinstance(text, Comment)):
-                    c.extract()
-                text_content = soup.get_text(separator=' ', strip=True)
-            else:
-                text_content = response.text
-
-            content = text_content.strip()
-            logger.debug("Successfully fetched content for URL: %s", url)
-
-        except httpx.HTTPError as http_err:
-            error_msg = f"Error fetching content from {url}: {http_err}"
-            logger.exception(error_msg)
-            content = error_msg
-        except Exception as e:
-            error_msg = f"Error fetching content from {url}: {e}"
-            logger.exception(error_msg)
-            content = error_msg
+    # Fetch content using fetch_urls_content from url_handler.py
+    contents = await fetch_urls_content([url], api_key_manager, httpx_client, config=config)
+    content = contents[0] if contents else f"Error fetching content from {url}"
 
     formatted_result = (
         f"Visual match {idx}:\n"
