@@ -75,8 +75,8 @@ async def fetch_reddit_content(url, api_key_manager, httpx_client=None, retries=
     Returns:
         str: A plain text string containing the submission details and comments.
     """
+    reddit = get_reddit_instance()
     try:
-        reddit = get_reddit_instance()
         submission = await reddit.submission(url=url)
         await submission.load()  # Ensure full metadata is loaded
 
@@ -112,3 +112,5 @@ async def fetch_reddit_content(url, api_key_manager, httpx_client=None, retries=
     except Exception as e:
         logger.exception("Error fetching Reddit content: %s", e)
         return f"Error fetching Reddit content: {e}"
+    finally:
+        await reddit.close()
