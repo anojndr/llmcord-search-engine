@@ -694,12 +694,18 @@ async def on_message(new_msg):
                     if response_contents or prev_content:
                         if response_contents == [] or len(response_contents[-1] + prev_content) > max_message_length:
                             response_contents.append("")
-                            if not searched_for_text_added and searched_for_text:
-                                response_contents[-1] = searched_for_text
-                                searched_for_text_added = True
                             if not use_plain_responses:
+                                # Create embed with searched_for_text prefix in description but keep it separate from response
+                                embed_description = ""
+                                if not searched_for_text_added and searched_for_text:
+                                    embed_description = searched_for_text
+                                    searched_for_text_added = True
+                                    
+                                # Append actual response content to description
+                                embed_description += response_contents[-1] + prev_content + STREAMING_INDICATOR
+                                
                                 embed = discord.Embed(
-                                    description=(response_contents[-1] + prev_content + STREAMING_INDICATOR),
+                                    description=embed_description,
                                     color=EMBED_COLOR_INCOMPLETE,
                                 )
                                 for warning in sorted(user_warnings):
@@ -747,11 +753,19 @@ async def on_message(new_msg):
                             if ready_to_edit or is_final_edit:
                                 if edit_task is not None:
                                     await edit_task
-                                embed.description = (
+                                    
+                                # When editing, make sure we preserve the searched_for_text prefix
+                                embed_description = ""
+                                if searched_for_text_added and searched_for_text:
+                                    embed_description = searched_for_text
+                                    
+                                embed_description += (
                                     response_contents[-1]
                                     if is_final_edit
                                     else (response_contents[-1] + STREAMING_INDICATOR)
                                 )
+                                
+                                embed.description = embed_description
                                 embed.color = (
                                     EMBED_COLOR_COMPLETE
                                     if msg_split_incoming or is_good_finish
