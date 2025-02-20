@@ -21,6 +21,65 @@ def truncate_base64(base64_string, max_length=50):
         return base64_string[:max_length] + "..."
     return base64_string
 
+def format_chat_history(messages):
+    """
+    Format the messages into a chat history string from oldest to newest.
+    
+    Args:
+        messages (list): The conversation messages.
+        
+    Returns:
+        str: The formatted chat history.
+    """
+    # Filter out system messages and reverse to get chronological order
+    chat_messages = [msg for msg in messages if msg.get("role") != "system"]
+    
+    chat_history = []
+    for i, msg in enumerate(chat_messages):
+        if msg["role"] == "user":
+            if isinstance(msg["content"], list):
+                # Handle multimodal content
+                text_content = next((part.get("text", "") for part in msg["content"] 
+                                    if part.get("type") == "text"), "")
+                chat_history.append(f"user: \n{text_content}")
+            else:
+                chat_history.append(f"user: \n{msg['content']}")
+        elif msg["role"] == "assistant":
+            if i > 0 and chat_messages[i-1]["role"] == "user":
+                # If this is an assistant response to the preceding user message,
+                # include the rephraser response based on the pattern in previous messages
+                last_user_msg = chat_messages[i-1]
+                # Look for the next user message to find the full interaction pattern
+                next_user_idx = next((j for j in range(i+1, len(chat_messages)) 
+                                     if chat_messages[j]["role"] == "user"), None)
+                
+                if next_user_idx is not None and next_user_idx < len(chat_messages):
+                    # We have found a complete interaction pattern
+                    rephraser_output = "not_needed"
+                    
+                    # Find if the assistant response has a <question> tag pattern
+                    assistant_content = msg.get("content", "")
+                    if isinstance(assistant_content, list):
+                        assistant_content = next((part.get("text", "") for part in assistant_content
+                                                if part.get("type") == "text"), "")
+                    
+                    question_match = re.search(r'<question>\s*(.*?)\s*</question>', assistant_content, re.DOTALL)
+                    if question_match:
+                        rephraser_output = question_match.group(1).strip()
+                    
+                    chat_history.append(f"rephraser response:\n`\n<question>\n{rephraser_output}\n</question>\n`")
+            
+            # Add the assistant response
+            if isinstance(msg["content"], list):
+                # Handle multimodal content
+                text_content = next((part.get("text", "") for part in msg["content"] 
+                                    if part.get("type") == "text"), "")
+                chat_history.append(f"assistant response:\n{text_content}")
+            else:
+                chat_history.append(f"assistant response:\n{msg['content']}")
+    
+    return "\n\n".join(chat_history)
+
 async def rephrase_query(messages, cfg, api_key_manager):
     """
     Determine whether the user's query needs rephrasing for a web search,
@@ -55,223 +114,64 @@ async def rephrase_query(messages, cfg, api_key_manager):
         if has_text_file:
             logger.info("Text file detected in message, skipping rephrasing")
             return 'not_needed'
+    
+    # Format the chat history
+    chat_history = format_chat_history(messages)
+    
+    # Get the latest user query
+    latest_query = ""
+    if latest_user_msg:
+        if isinstance(latest_user_msg['content'], str):
+            latest_query = latest_user_msg['content']
+        elif isinstance(latest_user_msg['content'], list):
+            for content_part in latest_user_msg['content']:
+                if content_part.get('type') == 'text':
+                    latest_query = content_part.get('text', '')
+                    break
+    
+    # Construct the rephraser prompt with the chat history
+    rephraser_prompt = '''You are an AI question rephraser. You will be given a conversation and a follow-up question,  you will have to rephrase the follow up question so it is a standalone question and can be used by another LLM to search the web for information to answer it.
+If it is a smple writing task or a greeting (unless the greeting contains a question after it) like Hi, Hello, How are you, etc. than a question then you need to return `not_needed` as the response (This is because the LLM won't need to search the web for finding information on this topic).
+You must always return the rephrased question inside the `question` XML block.
 
-    # Copy messages but exclude system messages (e.g. the system prompt from system_prompt.txt)
-    rephraser_messages = [dict(m) for m in messages if m.get("role") != "system"]
+There are several examples attached for your reference inside the below \`examples\` XML block
 
-    # Rephraser instructions are provided in detail.
-    rephraser_instruction = cfg.get('rephraser_instruction')
-    if not rephraser_instruction:
-        rephraser_instruction = '''You are {{Riley}}, a Web Search Decider. Your sole objective is to assist {{user}} by determining whether a query must be rephrased to perform a web search, and then outputting the rephrased query in the proper format. Under no circumstances should you include a web search prompt if the query clearly relates to general factual, timeless, or internally solvable questions, or if the necessary information is already provided within the current conversation context.
+<examples>
+1. Follow up question: What is the capital of France
+Rephrased question:`
+<question>
+Capital of france
+</question>
+`
 
-Your rules are as follows:
-
-• Strict Local Information Requirement:
-  – If the user’s query explicitly requests information regarding their or another location (e.g., weather forecasts, local business details, real-time events, public transit information), then you must rephrase the query for a web search.
-  – Do not perform a web search for questions that do not specify a geographic context.
-
-• Strict Freshness Requirement:
-  – If the query requests information that is likely to have changed recently (e.g., “current”, “latest”, “today”, “now”), or if you would otherwise need to state that your pretraining data might be outdated (for instance, current software versions, upcoming event schedules, stock prices), always rephrase the query to enforce a web search.
-  – If no such timely qualifier is mentioned, assume no search is needed.
-
-• Strict Niche or Specialized Data Requirement:
-  – If the answer depends on detailed, specialized, or less widely-known knowledge typically only found by consulting current web sources (for example, obscure research results, detailed technical documentation for cutting-edge software, or niche community opinions), then rephrase the query for a web search.
-  – In the absence of clear niche or specialized requirements, do not add a search component.
-
-• Accuracy Under High Risk:
-  – Where the consequences of an inaccuracy are high (such as using an outdated code library, missing a live event’s timing, or providing incorrect regulatory/legal details), always require a web search.
-  – Only rely on your pretraining if the error risk is negligible.
-
-• Contextual Information Check:
-  – Before initiating a web search, verify if the conversation already contains sufficient and relevant information to answer the query (for example, explicit links, summaries, or detailed descriptions provided earlier).
-  – If the required content is already fully available in the conversation, respond using that data without triggering a web search, even if additional search instructions are mentioned.
-
-• Creative Writing and Editing Exception:
-  – If the user's query involves creative writing, stylistic advice, editing, or restructuring a provided text (such as an essay introduction), assume all necessary context is already provided and do not trigger a web search.
-  – The focus in these cases is on internal content revision rather than the acquisition of new external data.
-
-• Handling Vague Follow-up Queries:
-  – When the user’s query is vague (e.g., “Where does this info come from? Fact check that info”) and clearly follows a previous query or response, you must reinterpret the query to be relevant to the preceding context.
-  – Use the relevant context from the previous query or the assistant’s response to generate a final search query that directly relates to confirming or fact-checking the provided details.
-  – If necessary context is missing or insufficient, prompt for clarification instead of triggering a web search.
-
-• Explicit Web Search Instruction:
-  – If the user explicitly provides a follow-up instruction that includes terms like “search”, “find on”, “lookup”, or any similar command targeting a web search, then you must rephrase the original query and append that instruction, but only if the query meets one or more of the conditions (local, freshness, niche/specialized, or high risk) AND the context does not already include the necessary information.
-  – Otherwise, ignore such an instruction if the query does not meet the strict conditions or if the information is already given.
-
---------------------------------------------------
-
-Examples:
-
-Example 1:
-{{user}}: Who was George Washington?
-
-{{Riley}}:
-<latest_user_query>
-Who was George Washington?
-</latest_user_query>
-
-Explanation: This is a well-established factual question with no local, timely, or niche data required. No web search is needed.
-
-Example 2:
-{{user}}: Which app promotes more sexual thirst trap content, TikTok or Instagram?
-
-{{Riley}}:
-<latest_user_query>
-Which app promotes more sexual thirst trap content, TikTok or Instagram?
-</latest_user_query>
-
-{{user}}: search reddit
-
-{{Riley}}:
-<latest_user_query>
-Which app promotes more sexual thirst trap content, TikTok or Instagram? reddit
-</latest_user_query>
-
-Explanation: The explicit “search reddit” instruction (combined with a subjective or niche comparison) forces a web search since it adds specialized context.
-
-Example 3:
-{{user}}: Can you help me solve this math problem: 15 * 24?
-
-{{Riley}}:
-<latest_user_query>
+2. Hi, how are you?
+Rephrased question\`
+<question>
 not_needed
-</latest_user_query>
+</question>
+`
 
-Explanation: This calculation is straightforward and does not require external data.
+3. Follow up question: What is Docker?
+Rephrased question: \`
+<question>
+What is Docker
+</question>
+`
+</examples>
 
-Example 4:
-{{user}}: What's your favorite color?
+Anything below is the part of the actual conversation and you need to use conversation and the follow-up question to rephrase the follow-up question as a standalone question based on the guidelines shared above.
 
-{{Riley}}:
-<latest_user_query>
-not_needed
-</latest_user_query>
+<conversation>
+{chat_history}
+</conversation>
 
-{{user}}: Why do you like that color?
+Follow up question: {query}
+Rephrased question:'''
 
-{{Riley}}:
-<latest_user_query>
-not_needed
-</latest_user_query>
-
-Explanation: Personal or opinion-based questions do not trigger a web search.
-
-Example 5:
-{{user}}: latest news
-
-{{Riley}}:
-<latest_user_query>
-Latest news
-</latest_user_query>
-
-{{user}}: summarize to 1 sentence
-
-{{Riley}}:
-<latest_user_query>
-not_needed
-</latest_user_query>
-
-Explanation: The query "latest news" requires up-to-date info so a web search is triggered. However, once a follow-up asks for summarization using already retrieved details, no new search is needed.
-
-Example 6 (Contextual Information Provided):
-{{user}}: [Provides a YouTube link with a summary of its content].
-
-{{user}}: What did the video say about each gun?
-
-{{Riley}}:
-<latest_user_query>
-[Use provided summary details instead of triggering a web search.]
-</latest_user_query>
-
-Explanation: Since the necessary information is already provided in the conversation, do not trigger a new web search even if similar instructions might otherwise call for one.
-
-Example 7 (Handling Vague Follow-ups):
-{{user}}: info about grok 3
-
-{{assistant}}: 
-Grok 3 is the latest AI chatbot from Elon Musk's company, xAI. It builds upon the earlier versions, Grok-1 and Grok-2, with advancements in several key areas (source: jagranjosh.com). xAI plans to launch Grok 3 on February 17 (source: Forbes.com). Elon Musk has stated that Grok 3 is in its final stages of development (source: Reuters.com).
-
-Here's a summary of what makes Grok 3 special:
-
-- Size and Complexity: Grok-3 has 314 billion parameters (source: jagranjosh.com).
-- Training: Pretrained with significant resources including the Colossus supercomputer and 100,000 Nvidia H100 GPUs (source: Forbes.com, Tom’s Hardware).
-- Real-Time Data: Can access real-time data from the X platform (formerly Twitter) (source: jagranjosh.com).
-- Multimodal Capabilities: Processes both text and visual inputs (source: jagranjosh.com).
-- Reasoning and Problem-Solving: Excels in complex tasks (source: jagranjosh.com).
-- Context Handling: Processes a context window of 128,000 tokens (source: jagranjosh.com).
-- Interaction Styles: Offers "Fun Mode" for humorous responses and "Regular Mode" for accurate answers (source: jagranjosh.com).
-
-Grok 3 is expected to outperform competitors like OpenAI’s ChatGPT and Google’s DeepMind Gemini (source: Forbes.com).
-
-{{user}}: Where does this info come from? Fact check that info
-
-{{Riley}}:
-<latest_user_query>
-Where does the information provided about Grok 3's features and launch details originate from? fact check that info
-</latest_user_query>
-
-Explanation: The follow-up query is vague on its own but becomes clear in context. The rephrased query now explicitly refers to the previous detailed context about Grok 3.
-
-Example 8 (Creative Writing/Editing Query):
-{{user}}:
-Should I separate the part where it starts talking about “this essay” from the 3D and 2D animation? This is the introduction to my essay I’m writing:
-
-"To this day, many people still prefer 2D animation over 3D. Even so, 2D animation struggles to find success over 3D in today's market, with a shocking forty-nine out of the fifty highest-grossing animated films being 3D and just one being 2D. In this essay I would like to discuss the possible reasons as to why that is the case and how that could change in the future."
-
-{{Riley}}:
-<latest_user_query>
-not_needed
-</latest_user_query>
-
-Explanation: Since the query relates to the internal analysis and editing of provided creative text, it is self-contained; no external or real-time information is needed, so do not trigger a web search.'''
-
-    latest_user_idx = None
-    for idx in reversed(range(len(rephraser_messages))):
-        if rephraser_messages[idx]['role'] == 'user':
-            latest_user_idx = idx
-            break
-
-    if latest_user_idx is not None:
-        # Prepend a label with a timestamp to all user messages.
-        for idx, msg in enumerate(rephraser_messages):
-            if msg['role'] == 'user':
-                timestamp_str = msg.get('timestamp')
-                if timestamp_str:
-                    try:
-                        timestamp = dt.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f%z")
-                    except ValueError:
-                        try:
-                            timestamp = dt.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S.%f")
-                        except ValueError:
-                            timestamp = dt.now()
-                else:
-                    timestamp = dt.now()
-                
-                formatted_timestamp = timestamp.strftime("%b %d, %Y %I:%M:%S %p")
-                label = f"Latest Query ({formatted_timestamp}): " if idx == latest_user_idx else f"Previous Query ({formatted_timestamp}): "
-                
-                if isinstance(msg['content'], list):
-                    for part in msg['content']:
-                        if part.get('type') == 'text':
-                            part['text'] = label + part.get('text', '')
-                            break
-                    else:
-                        msg['content'].insert(0, {'type': 'text', 'text': label})
-                elif isinstance(msg['content'], str):
-                    msg['content'] = label + msg['content']
-
-    # Prepend each user message with the rephraser instruction (only for the latest user message).
-    for i in range(len(rephraser_messages) - 1, -1, -1):
-        if rephraser_messages[i]['role'] == 'user':
-            original_content = rephraser_messages[i]['content']
-            if isinstance(original_content, list):
-                rephraser_messages[i]['content'] = [{'type': 'text', 'text': rephraser_instruction + '\n'}] + original_content
-            elif isinstance(original_content, str):
-                rephraser_messages[i]['content'] = rephraser_instruction + '\n' + original_content
-            else:
-                rephraser_messages[i]['content'] = rephraser_instruction + '\n' + str(original_content)
-            break
+    formatted_prompt = rephraser_prompt.format(
+        chat_history=chat_history,
+        query=latest_query
+    )
 
     rephraser_provider = cfg.get('rephraser_provider', 'openai')
     rephraser_model = cfg.get('rephraser_model', 'gpt-4')
@@ -279,9 +179,36 @@ Explanation: Since the query relates to the internal analysis and editing of pro
     if not api_key:
         api_key = 'sk-no-key-required'
 
+    # Build messages for the LLM API, including multimodal content if present
+    api_messages = []
+    
+    # Add the system message
+    api_messages.append({"role": "system", "content": "You are a concise assistant that rephrases questions."})
+    
+    # Add the user message with the formatted prompt and any images
+    user_message = {"role": "user", "content": formatted_prompt}
+    
+    # If the latest user message contains images and we're using a vision model,
+    # add the images to the LLM API call
+    if (latest_user_msg and 
+        isinstance(latest_user_msg['content'], list) and 
+        any(x in rephraser_model.lower() for x in ["gpt-4-vision", "gpt-4o", "claude-3", "gemini", "vision"])):
+        
+        # Extract images from the latest user message
+        images = [item for item in latest_user_msg['content'] 
+                 if item.get('type') == 'image_url']
+        
+        if images:
+            # Construct multimodal content with the prompt text and images
+            multimodal_content = [{"type": "text", "text": formatted_prompt}]
+            multimodal_content.extend(images)
+            user_message["content"] = multimodal_content
+    
+    api_messages.append(user_message)
+
     kwargs = {
         "model": rephraser_model,
-        "messages": rephraser_messages,
+        "messages": api_messages,
         "stream": False,
         "api_key": api_key,
         **cfg.get("rephraser_extra_api_parameters", {})
@@ -311,9 +238,17 @@ Explanation: Since the query relates to the internal analysis and editing of pro
             }
         ]
     
-    # NEW: print the payload to the terminal
-    import json
-    logger.info(f"Rephraser payload:\n{json.dumps(kwargs, indent=2, default=str)}")
+    # Log the payload with sensitive data redacted
+    logging_kwargs = json.loads(json.dumps(kwargs, default=str))
+    for message in logging_kwargs.get('messages', []):
+        if isinstance(message.get('content'), list):
+            for item in message['content']:
+                if item.get('type') == 'image_url' and 'url' in item.get('image_url', {}):
+                    item['image_url']['url'] = truncate_base64(item['image_url']['url'])
+        elif isinstance(message.get('content'), str):
+            pass
+            
+    logger.info(f"Rephraser payload:\n{json.dumps(logging_kwargs, indent=2, default=str)}")
     
     # ---- RETRY LOOP FOR REPHRASER CALL ----
     max_retries = 5
@@ -335,12 +270,12 @@ Explanation: Since the query relates to the internal analysis and editing of pro
 
     content = response.choices[0].message.content.strip()
     try:
-        match = re.search(r'<latest_user_query>\s*(.*?)\s*</latest_user_query>', content, re.DOTALL)
+        match = re.search(r'<question>\s*(.*?)\s*</question>', content, re.DOTALL)
         if match:
             latest_user_query = match.group(1).strip()
             return latest_user_query
         else:
-            logger.warning("No <latest_user_query> tags found in rephraser response.")
+            logger.warning("No <question> tags found in rephraser response.")
             return 'not_needed'
     except Exception:
         logger.warning("Failed to parse response in rephraser response.")
