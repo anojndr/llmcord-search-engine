@@ -9,29 +9,34 @@ of query strings.
 import logging
 import json
 import re
-
+from typing import List, Dict, Any
 from litellm import acompletion
+from api_key_manager import APIKeyManager
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-async def split_query(query, cfg, api_key_manager):
+async def split_query(
+    query: str,
+    cfg: Dict[str, Any],
+    api_key_manager: APIKeyManager
+) -> List[str]:
     """
     Split an input query into multiple queries when it implies a comparison.
 
     The prompt instructs the model to:
       - If a comparison exists, return multiple queries including the original.
       - Otherwise, simply return the original query in a JSON array.
-      
+
     Args:
-        query (str): The original user query.
-        cfg (dict): Configuration options.
+        query: The original user query.
+        cfg: Configuration options.
         api_key_manager: API key manager instance.
-        
+
     Returns:
-        list: A list of queries (strings) as parsed from the model's JSON output.
+        A list of queries (strings) as parsed from the model's JSON output.
     """
-    query_splitter_prompt = '''Your task is to determine if the query implies a comparison between multiple entities.
+    query_splitter_prompt: str = '''Your task is to determine if the query implies a comparison between multiple entities.
 
 If it does, decompose it into separate queries focusing on each entity, along with the original comparison query.
 
@@ -67,21 +72,20 @@ Input: "{query}"
 Output:
 '''
 
-    formatted_prompt = query_splitter_prompt.format(query=query)
+    formatted_prompt: str = query_splitter_prompt.format(query=query)
 
-    query_splitter_provider = cfg.get('query_splitter_provider', 'openai')
-    query_splitter_model = cfg.get('query_splitter_model', 'gpt-4')
-    api_key = await api_key_manager.get_next_api_key(query_splitter_provider)
+    query_splitter_provider: str = cfg.get('query_splitter_provider', 'openai')
+    query_splitter_model: str = cfg.get('query_splitter_model', 'gpt-4')
+    api_key: str = await api_key_manager.get_next_api_key(query_splitter_provider)
     if not api_key:
         api_key = 'sk-no-key-required'
 
-    # Build messages for the LLM API
-    messages = [
+    messages: List[Dict[str, str]] = [
         {"role": "system", "content": "You are a concise assistant."},
         {"role": "user", "content": formatted_prompt}
     ]
 
-    kwargs = {
+    kwargs: Dict[str, Any] = {
         "model": query_splitter_model,
         "messages": messages,
         "stream": False,
@@ -113,7 +117,7 @@ Output:
             }
         ]
 
-    logging_kwargs = json.loads(json.dumps(kwargs, default=str))
+    logging_kwargs: Dict[str, Any] = json.loads(json.dumps(kwargs, default=str))
     for message in logging_kwargs.get('messages', []):
         if isinstance(message.get('content'), list):
             for item in message['content']:
@@ -124,9 +128,8 @@ Output:
 
     logger.info(f"Payload being sent to LLM API for query_splitter:\n{json.dumps(logging_kwargs, indent=2, default=str)}")
 
-    # ---- RETRY LOOP FOR QUERY SPLITTER CALL ----
-    max_retries = 5
-    response = None
+    max_retries: int = 5
+    response: Any = None
     for i in range(max_retries):
         try:
             logger.info("Attempt %d for query splitter using API key: %s", i+1, kwargs.get("api_key"))
@@ -137,17 +140,16 @@ Output:
             kwargs["api_key"] = await api_key_manager.get_next_api_key(query_splitter_provider)
             if i == max_retries - 1:
                 return [query]
-    # ---- END RETRY LOOP ----
 
     if response is None:
         return [query]
 
-    content = response.choices[0].message.content.strip()
+    content: str = response.choices[0].message.content.strip()
     try:
         match = re.search(r'\[.*\]', content, re.DOTALL)
         if match:
-            json_content = match.group(0)
-            queries = json.loads(json_content)
+            json_content: str = match.group(0)
+            queries: List[str] = json.loads(json_content)
             if isinstance(queries, list) and all(isinstance(q, str) for q in queries):
                 return queries
             else:
@@ -160,7 +162,7 @@ Output:
         logger.warning("Failed to parse JSON in query_splitter response.")
         return [query]
 
-def truncate_base64(base64_string, max_length=50):
+def truncate_base64(base64_string: str, max_length: int = 50) -> str:
     """Utility function to truncate long base64 strings for logging purposes."""
     if len(base64_string) > max_length:
         return base64_string[:max_length] + "..."

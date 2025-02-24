@@ -7,11 +7,11 @@ and top comments via the YouTube API and YouTube Transcript API, and outputs a p
 
 import re
 import logging
-import os
 import html
+from typing import Optional, List, Dict, Any
 from urllib.parse import urlparse, parse_qs
-from datetime import datetime
-
+from api_key_manager import APIKeyManager
+import httpx
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi
@@ -19,25 +19,24 @@ from youtube_transcript_api import YouTubeTranscriptApi
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 
-
-def extract_video_id(url):
+def extract_video_id(url: str) -> Optional[str]:
     """
     Extract a YouTube video ID from a given URL.
-    
+
     Args:
-        url (str): The YouTube URL.
-    
+        url: The YouTube URL.
+
     Returns:
-        str or None: The extracted video ID, or None if it cannot be found.
+        The extracted video ID, or None if it cannot be found.
     """
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query)
     if "v" in query_params and query_params["v"]:
-        extracted = query_params["v"][0]
+        extracted: str = query_params["v"][0]
         if extracted:
             return extracted
 
-    patterns = [
+    patterns: List[str] = [
         r'youtu\.be/([^/?&]+)',
         r'youtube\.com/watch\?v=([^&]+)',
         r'youtube\.com/embed/([^/?&]+)',
@@ -50,54 +49,56 @@ def extract_video_id(url):
             return match.group(1)
     return None
 
-
-def format_duration(duration_str):
+def format_duration(duration_str: str) -> str:
     """
     Convert a YouTube duration string (ISO 8601) to a human-readable format.
-    
+
     Args:
-        duration_str (str): Duration string (e.g., "PT1H2M30S").
-    
+        duration_str: Duration string (e.g., "PT1H2M30S").
+
     Returns:
-        str: Human-readable duration.
+        Human-readable duration.
     """
-    import re
     match = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', duration_str)
     if not match:
         return "Unknown duration"
-    
+
     hours, minutes, seconds = match.groups()
-    parts = []
-    
+    parts: List[str] = []
+
     if hours:
         parts.append(f"{int(hours)} hour{'s' if hours != '1' else ''}")
     if minutes:
         parts.append(f"{int(minutes)} minute{'s' if minutes != '1' else ''}")
     if seconds:
         parts.append(f"{int(seconds)} second{'s' if seconds != '1' else ''}")
-        
+
     return ", ".join(parts)
 
-
-async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments=50):
+async def fetch_youtube_content(
+    url: str,
+    api_key_manager: APIKeyManager,
+    httpx_client: httpx.AsyncClient,
+    max_comments: int = 50
+) -> str:
     """
     Fetch YouTube video information including metadata, transcript, and top comments.
     Returns a plain text summary containing all gathered details.
-    
+
     Args:
-        url (str): YouTube video URL.
+        url: YouTube video URL.
         api_key_manager: API key manager instance.
         httpx_client: HTTP client.
-        max_comments (int): Maximum number of comments to retrieve.
-    
+        max_comments: Maximum number of comments to retrieve.
+
     Returns:
-        str: Plain text content containing video metadata, transcript, and comments.
+        Plain text content containing video metadata, transcript, and comments.
     """
-    video_id = extract_video_id(url)
+    video_id: Optional[str] = extract_video_id(url)
     if not video_id:
         return "Error: Could not extract video ID from URL."
 
-    api_key = await api_key_manager.get_next_api_key('youtube')
+    api_key: Optional[str] = await api_key_manager.get_next_api_key('youtube')
     if not api_key or api_key.strip() == "":
         return "Error: No YouTube API key available. Make sure 'youtube_api_keys' is set in your configuration."
 
@@ -113,12 +114,12 @@ async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments
         if not video_response.get('items'):
             return "Error: Video not found (may be deleted, private, or region-restricted)."
 
-        video_data = video_response['items'][0]
-        snippet = video_data['snippet']
-        content_details = video_data['contentDetails']
-        statistics = video_data['statistics']
-        
-        metadata = {
+        video_data: Dict[str, Any] = video_response['items'][0]
+        snippet: Dict[str, Any] = video_data['snippet']
+        content_details: Dict[str, Any] = video_data['contentDetails']
+        statistics: Dict[str, Any] = video_data['statistics']
+
+        metadata: Dict[str, Any] = {
             'title': html.unescape(snippet.get('title', 'Unknown Title')),
             'channel': html.unescape(snippet.get('channelTitle', 'Unknown Channel')),
             'published_at': snippet.get('publishedAt', ''),
@@ -130,16 +131,15 @@ async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments
             'tags': ', '.join([html.unescape(tag) for tag in snippet.get('tags', [])])
         }
 
-        # Fetch transcript without using any proxies
         try:
             transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
             transcript = transcripts.find_transcript(['en']).fetch()
-            captions = ' '.join(html.unescape(t['text']) for t in transcript)
+            captions: str = ' '.join(html.unescape(t['text']) for t in transcript)
         except Exception as e:
             logger.warning(f"Error fetching transcript: {e}")
-            captions = "No captions available for this video."
+            captions: str = "No captions available for this video."
 
-        comments = []
+        comments: List[Dict[str, Any]] = []
         try:
             comment_response = youtube.commentThreads().list(
                 part='snippet',
@@ -151,8 +151,8 @@ async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments
 
             while comment_response and len(comments) < max_comments:
                 for item in comment_response.get('items', []):
-                    comment_data = item['snippet']['topLevelComment']['snippet']
-                    comment = {
+                    comment_data: Dict[str, Any] = item['snippet']['topLevelComment']['snippet']
+                    comment: Dict[str, Any] = {
                         'text': html.unescape(comment_data.get('textDisplay', '')),
                         'author': html.unescape(comment_data.get('authorDisplayName', '')),
                         'like_count': comment_data.get('likeCount', 0),
@@ -182,7 +182,7 @@ async def fetch_youtube_content(url, api_key_manager, httpx_client, max_comments
                 'published_at': ''
             })
 
-        lines = []
+        lines: List[str] = []
         lines.append(f"Title: {metadata.get('title')}")
         lines.append(f"Channel: {metadata.get('channel')}")
         lines.append(f"Published: {metadata.get('published_at')}")
