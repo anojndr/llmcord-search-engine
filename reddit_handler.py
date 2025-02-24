@@ -3,6 +3,7 @@ Reddit Handler Module
 
 This module uses asyncpraw to fetch Reddit submissions and their comments.
 The content is then formatted into plain text for further processing.
+Comment parsing is offloaded to a thread to ensure concurrency.
 """
 
 import asyncpraw
@@ -12,6 +13,7 @@ import os
 from typing import Optional, List, Dict, Any
 from api_key_manager import APIKeyManager
 import httpx
+import asyncio
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -39,14 +41,18 @@ def get_reddit_instance() -> asyncpraw.Reddit:
         user_agent=user_agent
     )
 
-def _parse_comments(comments: Any, comment_list: List[Dict[str, Any]]) -> None:
+def parse_comments(comments: Any) -> List[Dict[str, Any]]:
     """
-    Recursively traverse asyncpraw comment forests and extract comment data.
+    Recursively traverse asyncpraw comment forests and extract comment data synchronously.
+    This function is run in a thread to avoid blocking the async event loop.
 
     Args:
         comments: Iterable of comment objects.
-        comment_list: List to populate with parsed comment data.
+
+    Returns:
+        List of parsed comment data.
     """
+    comment_list: List[Dict[str, Any]] = []
     for comment in comments:
         if isinstance(comment, asyncpraw.models.Comment):
             if comment.body:
@@ -58,7 +64,8 @@ def _parse_comments(comments: Any, comment_list: List[Dict[str, Any]]) -> None:
                 }
                 comment_list.append(comment_data)
             if hasattr(comment, "replies"):
-                _parse_comments(comment.replies, comment_list)
+                comment_list.extend(parse_comments(comment.replies))
+    return comment_list
 
 async def fetch_reddit_content(
     url: str,
@@ -68,6 +75,7 @@ async def fetch_reddit_content(
 ) -> str:
     """
     Fetch a Reddit submission and its comments, then output a plain text block.
+    Comment parsing is offloaded to a thread for concurrency.
 
     Args:
         url: URL of the Reddit post.
@@ -92,8 +100,8 @@ async def fetch_reddit_content(
         subreddit: str = submission.subreddit.display_name if submission.subreddit else ""
 
         await submission.comments.replace_more(limit=0)
-        comment_list: List[Dict[str, Any]] = []
-        _parse_comments(submission.comments, comment_list)
+        # Offload comment parsing to a thread
+        comment_list: List[Dict[str, Any]] = await asyncio.to_thread(parse_comments, submission.comments)
 
         lines: List[str] = []
         lines.append(f"Post Title: {title}")

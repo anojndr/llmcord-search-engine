@@ -6,6 +6,7 @@ This module is responsible for:
 - Extracting URLs from text using regex.
 - Fetching content from URLs (e.g., web pages, PDFs, YouTube, Reddit)
     and converting them into plain text formatted strings.
+Synchronous parsing operations are offloaded to threads for concurrency.
 """
 
 import asyncio
@@ -37,11 +38,55 @@ def extract_urls_from_text(text: str) -> List[str]:
     urls: List[str] = re.findall(url_pattern, text)
     return urls
 
+def parse_html_content(html_content: str) -> str:
+    """
+    Parse HTML content synchronously using BeautifulSoup and extract text.
+    This function is run in a thread to avoid blocking the async event loop.
+
+    Args:
+        html_content: Raw HTML string.
+
+    Returns:
+        Extracted text content.
+    """
+    soup: BeautifulSoup = BeautifulSoup(html_content, 'lxml')
+    for tag in soup(['script', 'style', 'header', 'footer', 'nav', 'aside', 'form', 'svg', 'canvas']):
+        tag.decompose()
+    for c in soup.find_all(text=lambda text: isinstance(text, Comment)):
+        c.extract()
+    text_content: str = soup.get_text(separator=' ', strip=True)[:20000]
+    return text_content
+
+def parse_pdf_content(pdf_bytes: bytes) -> str:
+    """
+    Extract text from PDF bytes synchronously using PyPDF2.
+    This function is run in a thread to avoid blocking the async event loop.
+
+    Args:
+        pdf_bytes: Raw PDF bytes.
+
+    Returns:
+        Extracted text content or error message.
+    """
+    try:
+        reader: PdfReader = PdfReader(BytesIO(pdf_bytes))
+        text_content: str = ''
+        for page in reader.pages:
+            text: Optional[str] = page.extract_text()
+            if text:
+                text_content += text + '\n'
+        if not text_content:
+            text_content = "No extractable text found in PDF."
+        return text_content[:20000]
+    except Exception as e:
+        return f"Error extracting text from PDF: {e}"
+
 @cached(cache=cache, ttl=3600)  # Cache results for 1 hour
 async def fetch_single_url_content(url: str, api_key_manager: APIKeyManager, httpx_client: httpx.AsyncClient) -> str:
     """
     Fetch and convert the content of a single URL to plain text.
     This function is cached to improve performance for repeated requests.
+    Synchronous parsing (HTML, PDF) is offloaded to threads.
 
     Args:
         url: The URL to fetch content from.
@@ -72,26 +117,11 @@ async def fetch_single_url_content(url: str, api_key_manager: APIKeyManager, htt
 
                 if 'application/pdf' in content_type:
                     pdf_bytes: bytes = response.content
-                    try:
-                        reader: PdfReader = PdfReader(BytesIO(pdf_bytes))
-                        text_content: str = ''
-                        for page in reader.pages:
-                            text: Optional[str] = page.extract_text()
-                            if text:
-                                text_content += text + '\n'
-                        if not text_content:
-                            text_content = f"No extractable text found in PDF at {url}."
-                        return f"PDF Content (fallback):\n{text_content[:20000]}"
-                    except Exception as e:
-                        return f"Error extracting text from PDF at {url}: {e}"
+                    text_content: str = await asyncio.to_thread(parse_pdf_content, pdf_bytes)
+                    return f"PDF Content (fallback):\n{text_content}"
                 elif 'text/html' in content_type:
                     html_content: str = response.text
-                    soup: BeautifulSoup = BeautifulSoup(html_content, 'lxml')
-                    for tag in soup(['script', 'style', 'header', 'footer', 'nav', 'aside', 'form', 'svg', 'canvas']):
-                        tag.decompose()
-                    for c in soup.find_all(text=lambda text: isinstance(text, Comment)):
-                        c.extract()
-                    text_content: str = soup.get_text(separator=' ', strip=True)[:20000]
+                    text_content: str = await asyncio.to_thread(parse_html_content, html_content)
                     return f"Extracted Content (BeautifulSoup fallback):\n{text_content}"
                 else:
                     text_content: str = response.text[:20000]

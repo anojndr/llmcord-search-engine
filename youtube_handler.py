@@ -3,6 +3,7 @@ YouTube Handler Module
 
 This module extracts YouTube video IDs from URLs, fetches video metadata, transcripts,
 and top comments via the YouTube API and YouTube Transcript API, and outputs a plain text summary.
+All network operations are performed concurrently where possible.
 """
 
 import re
@@ -15,6 +16,7 @@ import httpx
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from youtube_transcript_api import YouTubeTranscriptApi
+import asyncio
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -75,6 +77,62 @@ def format_duration(duration_str: str) -> str:
 
     return ", ".join(parts)
 
+def get_comments(youtube, video_id: str, max_comments: int = 50) -> List[Dict[str, Any]]:
+    """
+    Fetch top comments for a YouTube video synchronously.
+
+    Args:
+        youtube: YouTube API client.
+        video_id: Video ID.
+        max_comments: Maximum number of comments to fetch.
+
+    Returns:
+        List of comment dictionaries.
+    """
+    comments: List[Dict[str, Any]] = []
+    try:
+        comment_response = youtube.commentThreads().list(
+            part='snippet',
+            videoId=video_id,
+            maxResults=100,
+            textFormat='plainText',
+            order='relevance'
+        ).execute()
+
+        while comment_response and len(comments) < max_comments:
+            for item in comment_response.get('items', []):
+                comment_data = item['snippet']['topLevelComment']['snippet']
+                comment = {
+                    'text': html.unescape(comment_data.get('textDisplay', '')),
+                    'author': html.unescape(comment_data.get('authorDisplayName', '')),
+                    'like_count': comment_data.get('likeCount', 0),
+                    'published_at': comment_data.get('publishedAt', '')
+                }
+                comments.append(comment)
+                if len(comments) >= max_comments:
+                    break
+
+            if len(comments) < max_comments and 'nextPageToken' in comment_response:
+                comment_response = youtube.commentThreads().list(
+                    part='snippet',
+                    videoId=video_id,
+                    pageToken=comment_response['nextPageToken'],
+                    maxResults=100,
+                    textFormat='plainText',
+                    order='relevance'
+                ).execute()
+            else:
+                break
+    except Exception as e:
+        logger.warning(f"Error fetching comments: {e}")
+        comments.append({
+            'text': f"Error fetching comments: {str(e)}",
+            'author': 'System',
+            'like_count': 0,
+            'published_at': ''
+        })
+    return comments
+
 async def fetch_youtube_content(
     url: str,
     api_key_manager: APIKeyManager,
@@ -82,13 +140,13 @@ async def fetch_youtube_content(
     max_comments: int = 50
 ) -> str:
     """
-    Fetch YouTube video information including metadata, transcript, and top comments.
+    Fetch YouTube video information including metadata, transcript, and top comments concurrently.
     Returns a plain text summary containing all gathered details.
 
     Args:
         url: YouTube video URL.
         api_key_manager: API key manager instance.
-        httpx_client: HTTP client.
+        httpx_client: HTTP client (unused but kept for interface compatibility).
         max_comments: Maximum number of comments to retrieve.
 
     Returns:
@@ -105,16 +163,18 @@ async def fetch_youtube_content(
     try:
         youtube = build('youtube', 'v3', developerKey=api_key)
 
-        logger.info("Fetching YouTube video info for video_id=%s", video_id)
-        video_response = youtube.videos().list(
-            part='snippet,contentDetails,statistics,status',
-            id=video_id
-        ).execute()
+        # Fetch metadata first (required to check if video exists)
+        metadata_response = await asyncio.to_thread(
+            youtube.videos().list(
+                part='snippet,contentDetails,statistics,status',
+                id=video_id
+            ).execute
+        )
 
-        if not video_response.get('items'):
+        if not metadata_response.get('items'):
             return "Error: Video not found (may be deleted, private, or region-restricted)."
 
-        video_data: Dict[str, Any] = video_response['items'][0]
+        video_data: Dict[str, Any] = metadata_response['items'][0]
         snippet: Dict[str, Any] = video_data['snippet']
         content_details: Dict[str, Any] = video_data['contentDetails']
         statistics: Dict[str, Any] = video_data['statistics']
@@ -131,57 +191,24 @@ async def fetch_youtube_content(
             'tags': ', '.join([html.unescape(tag) for tag in snippet.get('tags', [])])
         }
 
-        try:
-            transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
-            transcript = transcripts.find_transcript(['en']).fetch()
-            captions: str = ' '.join(html.unescape(t['text']) for t in transcript)
-        except Exception as e:
-            logger.warning(f"Error fetching transcript: {e}")
-            captions: str = "No captions available for this video."
+        # Define async function for fetching transcript
+        async def fetch_transcript() -> str:
+            try:
+                transcripts = await asyncio.to_thread(YouTubeTranscriptApi.list_transcripts, video_id)
+                transcript = await asyncio.to_thread(transcripts.find_transcript, ['en']).fetch()
+                captions: str = ' '.join(html.unescape(t['text']) for t in transcript)
+                return captions
+            except Exception as e:
+                logger.warning(f"Error fetching transcript: {e}")
+                return "No captions available for this video."
 
-        comments: List[Dict[str, Any]] = []
-        try:
-            comment_response = youtube.commentThreads().list(
-                part='snippet',
-                videoId=video_id,
-                maxResults=100,
-                textFormat='plainText',
-                order='relevance'
-            ).execute()
+        # Fetch transcript and comments concurrently
+        transcript_task = fetch_transcript()
+        comments_task = asyncio.to_thread(get_comments, youtube, video_id, max_comments)
 
-            while comment_response and len(comments) < max_comments:
-                for item in comment_response.get('items', []):
-                    comment_data: Dict[str, Any] = item['snippet']['topLevelComment']['snippet']
-                    comment: Dict[str, Any] = {
-                        'text': html.unescape(comment_data.get('textDisplay', '')),
-                        'author': html.unescape(comment_data.get('authorDisplayName', '')),
-                        'like_count': comment_data.get('likeCount', 0),
-                        'published_at': comment_data.get('publishedAt', '')
-                    }
-                    comments.append(comment)
-                    if len(comments) >= max_comments:
-                        break
+        captions, comments = await asyncio.gather(transcript_task, comments_task)
 
-                if len(comments) < max_comments and 'nextPageToken' in comment_response:
-                    comment_response = youtube.commentThreads().list(
-                        part='snippet',
-                        videoId=video_id,
-                        pageToken=comment_response['nextPageToken'],
-                        maxResults=100,
-                        textFormat='plainText',
-                        order='relevance'
-                    ).execute()
-                else:
-                    break
-        except Exception as e:
-            logger.warning(f"Error fetching comments: {e}")
-            comments.append({
-                'text': f"Error fetching comments: {str(e)}",
-                'author': 'System',
-                'like_count': 0,
-                'published_at': ''
-            })
-
+        # Format the output
         lines: List[str] = []
         lines.append(f"Title: {metadata.get('title')}")
         lines.append(f"Channel: {metadata.get('channel')}")
@@ -206,7 +233,6 @@ async def fetch_youtube_content(
     except HttpError as http_err:
         logger.exception("HttpError while trying to fetch YouTube data.")
         return f"Error fetching YouTube content (HTTP error): {str(http_err)}"
-
     except Exception as e:
         logger.exception("General error while fetching YouTube content.")
         return f"Error fetching YouTube content: {str(e)}"
