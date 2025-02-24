@@ -19,10 +19,6 @@ from youtube_handler import fetch_youtube_content
 from reddit_handler import fetch_reddit_content
 from PyPDF2 import PdfReader
 from io import BytesIO
-from aiocache import cached, Cache
-
-# Set up an in-memory cache with a maximum of 100 items and a TTL of 1 hour
-cache = Cache(Cache.MEMORY, namespace="url_content", max_size=100)
 
 def extract_urls_from_text(text: str) -> List[str]:
     """
@@ -81,11 +77,9 @@ def parse_pdf_content(pdf_bytes: bytes) -> str:
     except Exception as e:
         return f"Error extracting text from PDF: {e}"
 
-@cached(cache=cache, ttl=3600)  # Cache results for 1 hour
 async def fetch_single_url_content(url: str, api_key_manager: APIKeyManager, httpx_client: httpx.AsyncClient) -> str:
     """
     Fetch and convert the content of a single URL to plain text.
-    This function is cached to improve performance for repeated requests.
     Synchronous parsing (HTML, PDF) is offloaded to threads.
 
     Args:
@@ -138,7 +132,7 @@ async def fetch_urls_content(
     config: Optional[Dict[str, Any]] = None
 ) -> List[str]:
     """
-    For each URL in the list, fetch its content and convert it to plain text using a cached function.
+    For each URL in the list, fetch its content and convert it to plain text.
     Handles special URLs like YouTube and Reddit differently.
 
     Args:
