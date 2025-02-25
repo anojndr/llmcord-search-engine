@@ -61,7 +61,7 @@ def format_chat_history(messages: List[Dict[str, Any]]) -> str:
                     if question_match:
                         rephraser_output = question_match.group(1).strip()
 
-                    chat_history.append(f"rephraser response:\n`\n<question>\n{rephraser_output}\n</question>\n`")
+                    chat_history.append(f"rephraser response:\n```\n<question>\n{rephraser_output}\n</question>\n```")
 
             if isinstance(msg["content"], list):
                 text_content: str = next((part.get("text", "") for part in msg["content"]
@@ -123,33 +123,37 @@ async def rephrase_query(
                     latest_query = content_part.get('text', '')
                     break
 
-    rephraser_prompt: str = '''You are an AI question rephraser. You will be given a conversation and a follow-up question,  you will have to rephrase the follow up question so it is a standalone question and can be used by another LLM to search the web for information to answer it.
+    # Using a raw string (r''') to prevent escape sequence issues with backticks
+    rephraser_prompt: str = r'''You are an AI question rephraser. You will be given a conversation and a follow-up question,  you will have to rephrase the follow up question so it is a standalone question and can be used by another LLM to search the web for information to answer it.
 If it is a smple writing task or a greeting (unless the greeting contains a question after it) like Hi, Hello, How are you, etc. than a question then you need to return `not_needed` as the response (This is because the LLM won't need to search the web for finding information on this topic).
 You must always return the rephrased question inside the `question` XML block.
 
-There are several examples attached for your reference inside the below \`examples\` XML block
+There are several examples attached for your reference inside the below `examples` XML block
 
 <examples>
 1. Follow up question: What is the capital of France
-Rephrased question:`
+Rephrased question:
+```
 <question>
 Capital of france
 </question>
-`
+```
 
 2. Hi, how are you?
-Rephrased question\`
+Rephrased question:
+```
 <question>
 not_needed
 </question>
-`
+```
 
 3. Follow up question: What is Docker?
-Rephrased question: \`
+Rephrased question: 
+```
 <question>
 What is Docker
 </question>
-`
+```
 </examples>
 
 Anything below is the part of the actual conversation and you need to use conversation and the follow-up question to rephrase the follow-up question as a standalone question based on the guidelines shared above.
