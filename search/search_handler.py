@@ -70,10 +70,20 @@ async def handle_search_queries(
 
     for idx, (res, content) in enumerate(zip(dedup_results, contents), start=1):
         lines.append(f"Result {idx}:")
-        lines.append(f"  URL: {res.url}")
-        lines.append(f"  Title: {res.title}")
-        lines.append(f"  Snippet: {res.snippet}")
-        lines.append("  Fetched Content:")
+        
+        # Check if Jina was used successfully
+        if content.startswith("__JINA_SUCCESS__"):
+            # Only show snippet for Jina results
+            lines.append(f"Snippet: {res.snippet}\n")
+            # Remove the Jina marker before adding content
+            content = content.replace("__JINA_SUCCESS__\n", "", 1)
+        else:
+            # Show URL, Title, and Snippet for non-Jina results
+            lines.append(f"RL: {res.url}\n")
+            lines.append(f"Title: {res.title}\n")
+            lines.append(f"Snippet: {res.snippet}\n")
+            lines.append("Fetched Content:\n")
+        
         lines.append(content)
         lines.append("")
     return "\n".join(lines)

@@ -414,7 +414,7 @@ async def handle_regular_message(
             aggregated_results: str = await handle_search_queries(
                 split_queries, api_key_manager, httpx_client, config=config
             )
-            augmented_user_message = f"User Query: {html.escape(new_msg.content)}\n\nAggregated Search Results:\n{aggregated_results}"
+            augmented_user_message = f"User Query: {html.escape(new_msg.content)}\n\n{aggregated_results}"
     
     # Update user message with search results or URL content
     if augmented_user_message:

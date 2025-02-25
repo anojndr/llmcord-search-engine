@@ -103,7 +103,7 @@ async def fetch_single_url_content(url: str, api_key_manager: APIKeyManager, htt
             response: httpx.Response = await httpx_client.get(jina_url, timeout=10.0)
             response.raise_for_status()
             text_content: str = response.text.strip()[:20000]
-            return f"Extracted Content (jina_ai):\n{text_content}"
+            return f"__JINA_SUCCESS__\n{text_content}"
         except httpx.HTTPError:
             try:
                 response: httpx.Response = await httpx_client.get(url, timeout=10.0, follow_redirects=True)
