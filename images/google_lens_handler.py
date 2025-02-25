@@ -11,8 +11,9 @@ import asyncio
 import logging
 from typing import Dict, Any, List
 import httpx
-from url_handler import fetch_urls_content
-from api_key_manager import APIKeyManager
+
+from config.api_key_manager import APIKeyManager
+from search.url_handler import fetch_urls_content
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

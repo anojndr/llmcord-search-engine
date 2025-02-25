@@ -14,11 +14,12 @@ import re
 from typing import List, Optional, Dict, Any
 from bs4 import BeautifulSoup, Comment
 import httpx
-from api_key_manager import APIKeyManager
-from youtube_handler import fetch_youtube_content
-from reddit_handler import fetch_reddit_content
 from PyPDF2 import PdfReader
 from io import BytesIO
+
+from config.api_key_manager import APIKeyManager
+from providers.youtube_handler import fetch_youtube_content
+from providers.reddit_handler import fetch_reddit_content
 
 def extract_urls_from_text(text: str) -> List[str]:
     """

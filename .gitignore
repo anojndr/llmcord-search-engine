@@ -9,5 +9,12 @@
 !docker-compose.yaml
 !requirements.txt
 !.env.example
+!core
+!images
+!llm
+!providers
+!search
+!utils
+!config
 
 organizer.py

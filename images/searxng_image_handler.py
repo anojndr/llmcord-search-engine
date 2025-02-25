@@ -12,8 +12,9 @@ import httpx
 from io import BytesIO
 from discord import File
 from urllib.parse import urljoin, quote, urlparse
-from api_key_manager import APIKeyManager
-from searxng_config import get_searxng_config
+
+from config.api_key_manager import APIKeyManager
+from config.searxng_config import get_searxng_config
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

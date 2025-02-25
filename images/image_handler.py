@@ -12,8 +12,9 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from discord import File
 from io import BytesIO
-from searxng_image_handler import download_image
-from api_key_manager import APIKeyManager
+
+from config.api_key_manager import APIKeyManager
+from images.searxng_image_handler import download_image
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

@@ -8,9 +8,10 @@ Delegates search queries to the SearchService and then wraps the results
 import logging
 from typing import Dict, Any, Optional, List
 import httpx
-from api_key_manager import APIKeyManager
-from search_service import SearchService, SearchResult
-from url_handler import fetch_urls_content
+
+from config.api_key_manager import APIKeyManager
+from search.search_service import SearchService, SearchResult
+from search.url_handler import fetch_urls_content
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

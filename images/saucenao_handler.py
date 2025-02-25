@@ -8,7 +8,8 @@ It downloads the given image, sends it to the SauceNAO API, and formats the resu
 import logging
 import httpx
 from typing import Dict, Any, List, Optional
-from api_key_manager import APIKeyManager
+
+from config.api_key_manager import APIKeyManager
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)

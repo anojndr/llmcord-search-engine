@@ -11,8 +11,9 @@ from typing import Any, Dict, Optional, List, Tuple
 import httpx
 from dataclasses import dataclass
 from urllib.parse import urljoin, quote
-from api_key_manager import APIKeyManager
-from searxng_config import get_searxng_config
+
+from config.api_key_manager import APIKeyManager
+from config.searxng_config import get_searxng_config
 
 logger = logging.getLogger(__name__)
 
