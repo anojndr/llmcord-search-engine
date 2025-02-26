@@ -16,5 +16,6 @@
 !search
 !utils
 !config
+!commands
 
 organizer.py

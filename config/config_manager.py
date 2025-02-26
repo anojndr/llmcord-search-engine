@@ -85,5 +85,6 @@ def get_config() -> Dict[str, Any]:
         "youtube_api_keys": os.getenv("YOUTUBE_API_KEYS", "").split(",") if os.getenv("YOUTUBE_API_KEYS") else [],
         "saucenao_api_keys": os.getenv("SAUCENAO_API_KEYS", "").split(",") if os.getenv("SAUCENAO_API_KEYS") else [],
         "max_urls": int(os.getenv("MAX_URLS", "5")),
+        "image_gen_api_keys": os.getenv("IMAGE_GEN_API_KEYS", "").split(",") if os.getenv("IMAGE_GEN_API_KEYS") else [],
     }
     return config

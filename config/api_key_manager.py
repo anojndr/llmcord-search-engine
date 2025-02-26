@@ -18,6 +18,7 @@ class APIKeyManager:
     serper_api_keys: List[str]
     serpapi_api_keys: List[str]
     youtube_api_keys: List[str]
+    image_gen_api_keys: List[str]
     saucenao_api_keys: List[str]
 
     def __init__(self, config: Dict[str, Any]) -> None:
@@ -41,6 +42,7 @@ class APIKeyManager:
         self.serper_api_keys = config.get('serper_api_keys', [])
         self.serpapi_api_keys = config.get('serpapi_api_keys', [])
         self.youtube_api_keys = config.get('youtube_api_keys', [])
+        self.image_gen_api_keys = config.get('image_gen_api_keys', [])
         self.saucenao_api_keys = config.get('saucenao_api_keys', [])
         if self.serper_api_keys:
             self.index_counters['serper'] = 0
@@ -48,6 +50,8 @@ class APIKeyManager:
             self.index_counters['serpapi'] = 0
         if self.youtube_api_keys:
             self.index_counters['youtube'] = 0
+        if self.image_gen_api_keys:
+            self.index_counters['image_gen'] = 0
         if self.saucenao_api_keys:
             self.index_counters['saucenao'] = 0
 
@@ -71,6 +75,8 @@ class APIKeyManager:
                 keys = self.serpapi_api_keys
             elif service_name == 'youtube':
                 keys = self.youtube_api_keys
+            elif service_name == 'image_gen':
+                keys = self.image_gen_api_keys
             elif service_name == 'saucenao':
                 keys = self.saucenao_api_keys
 

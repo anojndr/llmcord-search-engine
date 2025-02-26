@@ -12,6 +12,7 @@ from datetime import datetime as dt
 from typing import Dict, Any, List, Optional, Set, Tuple
 
 import discord
+from commands.setup import setup_commands
 import httpx
 from discord import Message, AllowedMentions
 from litellm import acompletion
@@ -50,12 +51,14 @@ class BotClient(discord.Client):
         super().__init__(*args, **kwargs)
         self.httpx_client = httpx.AsyncClient(http2=True)
         self.msg_nodes: Dict[int, MsgNode] = {}
+        self.command_manager = None
         self.api_key_manager: Optional[APIKeyManager] = None
         self.last_task_time: Optional[float] = None
         self.initialize_resources()
     
     def initialize_resources(self) -> None:
         """Initialize bot resources such as API key manager."""
+        # Initialize API key manager
         cfg = get_config()
         self.api_key_manager = APIKeyManager(cfg)
         
@@ -64,6 +67,22 @@ class BotClient(discord.Client):
             logger.info(
                 f"\n\nBOT INVITE URL:\nhttps://discord.com/api/oauth2/authorize?client_id={client_id}&permissions=412317273088&scope=bot\n"
             )
+
+        # Set up slash commands
+        self.command_manager = setup_commands(self, self.api_key_manager)
+    
+    async def setup_hook(self) -> None:
+        """
+        Async setup hook that runs before the bot starts.
+        This is used to sync slash commands.
+        """
+        try:
+            # Sync commands after the bot is connected
+            if self.command_manager:
+                await self.command_manager.sync_commands()
+                logger.info("Slash commands synchronized successfully")
+        except Exception as e:
+            logger.error(f"Error syncing commands: {e}")
     
     async def close(self) -> None:
         """Close the bot client and all resources."""
