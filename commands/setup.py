@@ -5,11 +5,13 @@ This module handles setting up all slash commands for the Discord bot.
 """
 
 import discord
+from discord import app_commands
 import logging
 from typing import Dict, Any
 
 from config.api_key_manager import APIKeyManager
 from commands.generateimage_command import setup_generateimage_command
+from commands.model_command import setup_model_command
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -29,13 +31,20 @@ class CommandManager:
         self.api_key_manager = api_key_manager
         self.commands = {}
         
-        # Initialize commands
-        self.generate_image_command = setup_generateimage_command(client, api_key_manager)
+        # Create a single command tree for the client
+        self.tree = app_commands.CommandTree(client)
+        
+        # Initialize commands with the shared command tree
+        self.generate_image_command = setup_generateimage_command(client, api_key_manager, self.tree)
+        self.model_command = setup_model_command(client, api_key_manager, self.tree)
     
     async def sync_commands(self) -> None:
         """Synchronize all commands with Discord."""
-        await self.generate_image_command.sync_commands()
-        logger.info("All commands synchronized")
+        try:
+            await self.tree.sync()
+            logger.info("All commands synchronized successfully")
+        except Exception as e:
+            logger.error(f"Error syncing commands: {e}")
 
 def setup_commands(client: discord.Client, api_key_manager: APIKeyManager) -> CommandManager:
     """

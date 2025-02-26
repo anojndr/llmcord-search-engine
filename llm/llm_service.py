@@ -72,9 +72,25 @@ class LLMService:
         Returns:
             Request payload dictionary
         """
+        # Create clean messages with only standard fields
+        processed_messages = []
+        
+        for message in messages:
+            # Keep only standard OpenAI-compatible fields
+            processed_message = {
+                "role": message["role"],
+                "content": message["content"]
+            }
+            
+            # Add name field if present (supported by OpenAI and some others)
+            if "name" in message:
+                processed_message["name"] = message["name"]
+            
+            processed_messages.append(processed_message)
+        
         kwargs: Dict[str, Any] = {
             "model": config["model"],
-            "messages": messages,
+            "messages": processed_messages,
             "stream": True,
             "api_key": api_key,
             **config["extra_api_parameters"]

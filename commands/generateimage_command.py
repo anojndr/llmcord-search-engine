@@ -19,17 +19,18 @@ logger.setLevel(logging.DEBUG)
 class GenerateImageCommand:
     """Handler for the /generateimage slash command."""
     
-    def __init__(self, client: discord.Client, api_key_manager: APIKeyManager):
+    def __init__(self, client: discord.Client, api_key_manager: APIKeyManager, command_tree: app_commands.CommandTree):
         """
         Initialize the command handler.
         
         Args:
             client: Discord client instance
             api_key_manager: API key manager instance
+            command_tree: The shared command tree from CommandManager
         """
         self.client = client
         self.api_key_manager = api_key_manager
-        self.tree = app_commands.CommandTree(client)
+        self.tree = command_tree
         
         # Register the command
         self.register_command()
@@ -113,26 +114,19 @@ class GenerateImageCommand:
         except:
             # Fallback to environment variable
             return None
-    
-    async def sync_commands(self) -> None:
-        """Synchronize commands with Discord."""
-        try:
-            await self.tree.sync()
-            logger.info("Slash commands synchronized successfully")
-        except Exception as e:
-            logger.error(f"Error syncing commands: {e}")
 
 # Function to setup the command
-def setup_generateimage_command(client: discord.Client, api_key_manager: APIKeyManager) -> GenerateImageCommand:
+def setup_generateimage_command(client: discord.Client, api_key_manager: APIKeyManager, command_tree: app_commands.CommandTree) -> GenerateImageCommand:
     """
     Set up the /generateimage command.
     
     Args:
         client: Discord client instance
         api_key_manager: API key manager instance
+        command_tree: The shared command tree from CommandManager
     
     Returns:
         Command handler instance
     """
-    command = GenerateImageCommand(client, api_key_manager)
+    command = GenerateImageCommand(client, api_key_manager, command_tree)
     return command
