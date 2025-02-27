@@ -195,8 +195,12 @@ async def fetch_youtube_content(
         # Define async function for fetching transcript
         async def fetch_transcript() -> str:
             try:
-                transcripts = await asyncio.to_thread(YouTubeTranscriptApi.list_transcripts, video_id)
-                transcript = await asyncio.to_thread(transcripts.find_transcript, ['en']).fetch()
+                def get_transcript():
+                    transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
+                    transcript_obj = transcripts.find_transcript(['en'])
+                    return transcript_obj.fetch()
+
+                transcript = await asyncio.to_thread(get_transcript)
                 captions: str = ' '.join(html.unescape(t['text']) for t in transcript)
                 return captions
             except Exception as e:
