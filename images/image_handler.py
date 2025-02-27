@@ -14,7 +14,7 @@ from discord import File
 from io import BytesIO
 
 from config.api_key_manager import APIKeyManager
-from images.searxng_image_handler import download_image
+from images.utils import download_image
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
