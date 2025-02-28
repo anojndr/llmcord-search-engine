@@ -36,7 +36,8 @@ async def process_message_attachments(
     httpx_client: httpx.AsyncClient,
     allowed_file_types: Tuple[str, ...],
     max_text: int,
-    bot_user: ClientUser
+    bot_user: ClientUser,
+    provider: str = None  # New parameter for provider-specific handling
 ) -> Tuple[str, List[Dict[str, Any]], bool]:
     """
     Process attachments in a Discord message.
@@ -47,6 +48,7 @@ async def process_message_attachments(
         allowed_file_types: Tuple of allowed file types
         max_text: Maximum text length
         bot_user: Bot user object
+        provider: The provider being used (e.g., 'google')
         
     Returns:
         Tuple containing:
@@ -54,6 +56,34 @@ async def process_message_attachments(
         - List of image data
         - Flag indicating if there were unsupported attachments
     """
+    # Define max file size for Google provider
+    MAX_GOOGLE_FILE_SIZE_BYTES = 20 * 1024 * 1024  # 20 MB limit
+    
+    # Define mime types for Google provider
+    google_supported_mime_types = {
+        'application/pdf': 'pdf',
+        'application/x-javascript': 'text/javascript',  # Normalize to standard mime type
+        'text/javascript': 'javascript',
+        'application/x-python': 'text/x-python',  # Normalize to standard mime type
+        'text/x-python': 'python',
+        'text/plain': 'txt',
+        'text/html': 'html',
+        'text/css': 'css',
+        'text/md': 'markdown',
+        'text/csv': 'csv',
+        'text/xml': 'xml',
+        'text/rtf': 'rtf',
+        'audio/wav': 'audio',
+        'audio/mp3': 'audio',
+        'audio/aiff': 'audio',
+        'audio/aac': 'audio',
+        'audio/ogg': 'audio',
+        'audio/flac': 'audio'
+    }
+    
+    provider = provider or ""  # Default to empty string if None
+    is_google_provider = provider.lower() == 'google'
+    
     good_attachments: Dict[str, List[discord.Attachment]] = {
         type: [
             att
@@ -75,20 +105,73 @@ async def process_message_attachments(
     if text_content.startswith(bot_user.mention):
         text_content = text_content.replace(bot_user.mention, "", 1).lstrip()
         
-    images: List[Dict[str, Any]] = [
-        dict(
-            type="image_url",
-            image_url=dict(
-                url=f"data:{att.content_type};base64,{b64encode((await httpx_client.get(att.url)).content).decode('utf-8')}"
-            ),
+    images: List[Dict[str, Any]] = []
+    has_bad_attachments: bool = False
+    
+    # Process attachments based on provider
+    if is_google_provider:
+        logger.info(f"Processing attachments for Google provider (Gemini)")
+        
+        for att in message.attachments:
+            logger.debug(f"Processing attachment: {att.filename}, content_type: {att.content_type}, size: {att.size} bytes")
+            
+            if att.size > MAX_GOOGLE_FILE_SIZE_BYTES:
+                logger.warning(f"File too large for Google API: {att.filename} ({att.size} bytes)")
+                has_bad_attachments = True
+                continue
+                
+            if att.content_type:
+                # Check if this is an image attachment
+                if "image" in att.content_type:
+                    logger.debug(f"Adding image attachment: {att.filename}")
+                    images.append(
+                        dict(
+                            type="image_url",
+                            image_url=dict(
+                                url=f"data:{att.content_type};base64,{b64encode((await httpx_client.get(att.url)).content).decode('utf-8')}"
+                            ),
+                        )
+                    )
+                # Handle supported file types for Google Gemini
+                elif any(mime_type in att.content_type for mime_type in google_supported_mime_types):
+                    logger.debug(f"Adding file attachment as data URL: {att.filename}")
+                    content = await httpx_client.get(att.url)
+                    
+                    # Use original mime type or normalize it if needed
+                    mime_type = att.content_type
+                    if mime_type in google_supported_mime_types and isinstance(google_supported_mime_types[mime_type], str) and '/' in google_supported_mime_types[mime_type]:
+                        mime_type = google_supported_mime_types[mime_type]
+                    
+                    images.append(
+                        dict(
+                            type="image_url",  # LiteLLM uses image_url for all file types
+                            image_url=dict(
+                                url=f"data:{mime_type};base64,{b64encode(content.content).decode('utf-8')}"
+                            ),
+                        )
+                    )
+                else:
+                    logger.warning(f"Unsupported file type for Google API: {att.filename} (content type: {att.content_type})")
+                    has_bad_attachments = True
+    else:
+        # Keep original behavior for other providers - only handle images
+        logger.debug(f"Processing images for non-Google provider: {provider}")
+        images = [
+            dict(
+                type="image_url",
+                image_url=dict(
+                    url=f"data:{att.content_type};base64,{b64encode((await httpx_client.get(att.url)).content).decode('utf-8')}"
+                ),
+            )
+            for att in good_attachments["image"]
+        ]
+        
+        # Calculate has_bad_attachments for non-Google providers
+        has_bad_attachments = len(message.attachments) > sum(
+            len(att_list) for att_list in good_attachments.values()
         )
-        for att in good_attachments["image"]
-    ]
     
-    has_bad_attachments: bool = len(message.attachments) > sum(
-        len(att_list) for att_list in good_attachments.values()
-    )
-    
+    logger.info(f"Processed {len(images)} attachments, has_bad_attachments={has_bad_attachments}")
     return text_content[:max_text], images, has_bad_attachments
 
 async def find_next_message(
@@ -194,11 +277,14 @@ async def build_conversation_context(
         - List of messages for LLM context
         - Set of user warnings
     """
+    # Get provider from config
+    provider: str = config["provider"]
+    
     # Determine model capabilities
     accept_images: bool = any(x in config["model"].lower() for x in [
         "gpt-4o", "claude-3", "gemini", "pixtral", "llava", "vision", "vl"
     ])
-    accept_usernames: bool = any(x in config["provider"].lower() for x in [
+    accept_usernames: bool = any(x in provider.lower() for x in [
         "openai", "x-ai"
     ])
     
@@ -216,9 +302,9 @@ async def build_conversation_context(
         curr_node: MsgNode = msg_nodes.setdefault(curr_msg.id, MsgNode())
         async with curr_node.lock:
             if curr_node.text is None:
-                # Extract message content and attachments
+                # Extract message content and attachments, passing provider
                 curr_node.text, curr_node.images, curr_node.has_bad_attachments = await process_message_attachments(
-                    curr_msg, httpx_client, allowed_file_types, max_text, bot_user
+                    curr_msg, httpx_client, allowed_file_types, max_text, bot_user, provider
                 )
                 
                 # Set message role and user ID
