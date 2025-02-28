@@ -7,7 +7,9 @@ google-api-python-client
 youtube-transcript-api
 PyPDF2
 Flask
-python-dotenv 
+python-dotenv
 urllib3
 dataclasses-json
 aiocache
+litellm
+asyncpraw
