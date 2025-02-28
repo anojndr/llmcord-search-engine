@@ -17,5 +17,6 @@
 !utils
 !config
 !commands
+!system_prompt.txt
 
 organizer.py
