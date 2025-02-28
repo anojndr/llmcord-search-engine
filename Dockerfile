@@ -1,12 +1,7 @@
 # Use slim version of Python 3.12 as the base image
 FROM python:3.12-slim
-ARG DEBIAN_FRONTEND=noninteractive
 
-# Install system dependencies required by some Python packages
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libc6-dev \
-    && rm -rf /var/lib/apt/lists/*
+ARG DEBIAN_FRONTEND=noninteractive
 
 # Set the working directory inside the container
 WORKDIR /usr/src/app
@@ -15,8 +10,7 @@ WORKDIR /usr/src/app
 COPY requirements.txt .
 
 # Install Python dependencies without caching
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir litellm asyncpraw
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy all local files into the container
 COPY . .
