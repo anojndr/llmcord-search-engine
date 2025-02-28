@@ -75,7 +75,7 @@ async def fetch_images_from_searxng(
 
         data: Dict[str, Any] = response.json()
         if not data.get('results'):
-            logger.warning("No image results found from SearxNG")
+            logger.warning(f"No image results found from SearxNG for query: {query}")
             return [], []
 
         image_tasks: List[asyncio.Task] = []
@@ -91,7 +91,7 @@ async def fetch_images_from_searxng(
                 image_tasks.append(download_image(img_url, httpx_client, source_url))
 
         if not image_tasks:
-            logger.warning("No valid image URLs found in SearxNG results")
+            logger.warning(f"No valid image URLs found in SearxNG results for query: {query}")
             return [], []
 
         downloaded_images: List[Optional[bytes]] = await asyncio.gather(*image_tasks)
@@ -111,10 +111,11 @@ async def fetch_images_from_searxng(
             if successful_downloads >= num_images:
                 break
 
+        logger.info(f"SearxNG returned {successful_downloads} images and {len(image_urls)} failed URLs for query: {query}")
         return image_files, image_urls
 
     except Exception as e:
-        logger.error(f"Error in SearxNG image search: {str(e)}")
+        logger.error(f"Error in SearxNG image search for query '{query}': {str(e)}", exc_info=True)
         return [], []
 
 async def fetch_images(
@@ -147,14 +148,17 @@ async def fetch_images(
         files, urls = await fetch_images_from_searxng(query, num_images, api_key_manager, httpx_client)
 
         if not files and not urls:
+            logger.info(f"SearxNG found no images for query '{query}'. Falling back to Serper.")
             files, urls = await fetch_images_from_serper([query], num_images, api_key_manager, httpx_client)
             if isinstance(files, list):
                 files = files
             else:
+                logger.warning(f"Serper returned invalid files type for query '{query}': {type(files)}")
                 files = []
             if isinstance(urls, list):
                 urls = urls
             else:
+                logger.warning(f"Serper returned invalid URLs type for query '{query}': {type(urls)}")
                 urls = []
 
         image_files_dict[query] = files

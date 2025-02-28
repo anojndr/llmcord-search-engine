@@ -41,11 +41,11 @@ async def get_google_lens_results(
     Raises:
         Exception: If an API key is not available or the HTTP request fails.
     """
-    logger.debug("Starting get_google_lens_results with image_url=%s", image_url)
+    logger.info(f"Starting Google Lens search with image URL: {image_url}")
 
     api_key: str = await api_key_manager.get_next_api_key('serpapi')
     if not api_key:
-        error_msg: str = "No SerpApi API key available."
+        error_msg: str = "No SerpApi API key available for Google Lens search"
         logger.error(error_msg)
         raise Exception(error_msg)
 
@@ -56,9 +56,10 @@ async def get_google_lens_results(
         'country': country,
         'api_key': api_key
     }
-    logger.debug("get_google_lens_results params: %s", params)
+    logger.debug(f"Google Lens API parameters: {params.copy().update({'api_key': '***REDACTED***'})}")
 
     try:
+        logger.info("Sending request to SerpApi Google Lens endpoint")
         response: httpx.Response = await httpx_client.get(
             'https://serpapi.com/search',
             params=params,
@@ -66,13 +67,16 @@ async def get_google_lens_results(
         )
         response.raise_for_status()
         data: Dict[str, Any] = response.json()
-        logger.debug("Google Lens response received successfully.")
+        
+        # Log basic stats about the response
+        visual_matches = data.get('visual_matches', [])
+        logger.info(f"Google Lens search successful. Found {len(visual_matches)} visual matches.")
         return data
     except httpx.HTTPError as http_err:
-        logger.exception("HTTP error during Google Lens request: %s", http_err)
+        logger.error(f"HTTP error during Google Lens request: {http_err}", exc_info=True)
         raise
     except Exception as e:
-        logger.exception("Unexpected error while calling Google Lens API: %s", e)
+        logger.error(f"Unexpected error while calling Google Lens API: {e}", exc_info=True)
         raise
 
 async def process_google_lens_results(
@@ -97,28 +101,33 @@ async def process_google_lens_results(
         A formatted string containing processed results.
     """
     visual_matches: List[Dict[str, Any]] = results.get('visual_matches', [])
-    logger.debug("Processing %d visual matches.", len(visual_matches))
+    logger.info(f"Processing {len(visual_matches)} visual matches from Google Lens results")
 
     formatted_results: str = ''
     tasks: List[asyncio.Task] = []
 
-    for idx, match in enumerate(visual_matches[:10], start=1):
+    # Limit to first 10 matches
+    matches_to_process = visual_matches[:10]
+    
+    # Queue up all fetch tasks
+    for idx, match in enumerate(matches_to_process, start=1):
         url: str = match.get('link', '')
         title: str = match.get('title', '')
-        logger.debug("Queueing visual match #%d: url=%s, title=%s", idx, url, title)
+        logger.debug(f"Queueing visual match #{idx}: url={url}, title={title}")
         tasks.append(process_visual_match(idx, url, title, config, api_key_manager, httpx_client))
 
     try:
+        logger.info(f"Processing {len(tasks)} visual match tasks concurrently")
         processed_matches: List[str] = await asyncio.gather(*tasks)
-    except Exception:
-        logger.exception("Error while processing one or more visual matches.")
+        
+        for match_result in processed_matches:
+            formatted_results += match_result
+
+        logger.info("All visual matches processed successfully")
+        return formatted_results
+    except Exception as e:
+        logger.error(f"Error while processing visual matches: {e}", exc_info=True)
         raise
-
-    for match_result in processed_matches:
-        formatted_results += match_result
-
-    logger.debug("All visual matches processed.")
-    return formatted_results
 
 async def process_visual_match(
     idx: int,
@@ -142,17 +151,21 @@ async def process_visual_match(
     Returns:
         A string of formatted results for the visual match.
     """
-    logger.debug("Starting process_visual_match #%d: %s", idx, url)
+    logger.debug(f"Processing visual match #{idx}: {url}")
     content: str = ''
 
-    contents: List[str] = await fetch_urls_content([url], api_key_manager, httpx_client, config=config)
-    content = contents[0] if contents else f"Error fetching content from {url}"
+    try:
+        contents: List[str] = await fetch_urls_content([url], api_key_manager, httpx_client, config=config)
+        content = contents[0] if contents else f"Error fetching content from {url}"
+        
+        formatted_result: str = (
+            f"Visual match {idx}:\n"
+            f"Url of visual match {idx}: {url}\n"
+            f"Url of visual match {idx} content:\n{content}\n\n"
+        )
 
-    formatted_result: str = (
-        f"Visual match {idx}:\n"
-        f"Url of visual match {idx}: {url}\n"
-        f"Url of visual match {idx} content:\n{content}\n\n"
-    )
-
-    logger.debug("Finished processing visual match #%d.", idx)
-    return formatted_result
+        logger.debug(f"Finished processing visual match #{idx}")
+        return formatted_result
+    except Exception as e:
+        logger.error(f"Error processing visual match #{idx} ({url}): {e}", exc_info=True)
+        return f"Visual match {idx}:\nUrl of visual match {idx}: {url}\nError: {str(e)}\n\n"

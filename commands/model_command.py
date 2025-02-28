@@ -63,7 +63,7 @@ class ModelCommand:
             interaction: discord.Interaction, 
             provider: str,
             model: str
-        ) -> None:
+        ) -> None:  # type: ignore
             """
             Set the model and provider for the bot.
             
@@ -75,11 +75,9 @@ class ModelCommand:
             # Defer response to avoid timeout
             await interaction.response.defer(ephemeral=False)
             
-            # Get current config to modify
-            cfg = get_config()
-            
             # Check if provider is valid
             if provider not in PROVIDER_MODELS:
+                logger.warning(f"Invalid provider '{provider}' requested by {interaction.user.name} ({interaction.user.id})")
                 await interaction.followup.send(
                     f"Invalid provider: {provider}. Available providers: {', '.join(PROVIDER_MODELS.keys())}",
                     ephemeral=False
@@ -88,6 +86,7 @@ class ModelCommand:
             
             # Check if model is valid for this provider
             if model not in PROVIDER_MODELS[provider]:
+                logger.warning(f"Invalid model '{model}' for provider '{provider}' requested by {interaction.user.name} ({interaction.user.id})")
                 await interaction.followup.send(
                     f"Invalid model: {model} for provider {provider}. Available models: {', '.join(PROVIDER_MODELS[provider])}",
                     ephemeral=False
@@ -97,6 +96,9 @@ class ModelCommand:
             # Update current config
             try:
                 # Set environment variables
+                old_provider = os.environ.get("PROVIDER", "unknown")
+                old_model = os.environ.get("MODEL", "unknown")
+                
                 os.environ["PROVIDER"] = provider
                 os.environ["MODEL"] = model
                 
@@ -106,10 +108,10 @@ class ModelCommand:
                     ephemeral=False
                 )
                 
-                logger.info(f"Model changed to {provider}/{model} by {interaction.user.name} ({interaction.user.id})")
+                logger.info(f"Model changed from {old_provider}/{old_model} to {provider}/{model} by {interaction.user.name} ({interaction.user.id})")
             
             except Exception as e:
-                logger.exception(f"Error setting model: {e}")
+                logger.error(f"Error setting model to {provider}/{model}: {e}", exc_info=True)
                 await interaction.followup.send(
                     f"An error occurred: {str(e)}",
                     ephemeral=False
@@ -117,7 +119,7 @@ class ModelCommand:
         
         # Implement autocomplete for provider parameter
         @model.autocomplete('provider')
-        async def provider_autocomplete(
+        async def provider_autocomplete(  # type: ignore
             interaction: discord.Interaction,
             current: str,
         ) -> List[app_commands.Choice[str]]:
@@ -144,7 +146,7 @@ class ModelCommand:
         
         # Implement autocomplete for model parameter
         @model.autocomplete('model')
-        async def model_autocomplete(
+        async def model_autocomplete(  # type: ignore
             interaction: discord.Interaction,
             current: str,
         ) -> List[app_commands.Choice[str]]:
@@ -194,5 +196,6 @@ def setup_model_command(client: discord.Client, api_key_manager: APIKeyManager, 
     Returns:
         Command handler instance
     """
+    logger.info("Setting up /model command")
     command = ModelCommand(client, api_key_manager, command_tree)
     return command

@@ -43,20 +43,22 @@ async def fetch_images_from_serper(
     image_urls: List[str] = []
 
     for query in queries:
-        api_key: str = await api_key_manager.get_next_api_key('serper')
+        logger.info(f"Fetching images from Serper for query: '{query}'")
+        api_key: Optional[str] = await api_key_manager.get_next_api_key('serper')
         if not api_key:
-            logger.warning("No Serper API key available.")
+            logger.warning(f"No Serper API key available for image query: '{query}'")
             continue
 
         params: Dict[str, Any] = {
             'q': query,
-            'num': num_images * 2,
+            'num': num_images * 2,  # Request more to account for failures
             'type': 'images',
             'autocorrect': 'false',
             'apiKey': api_key
         }
 
         try:
+            logger.debug(f"Making Serper images API request for query: '{query}'")
             response: httpx.Response = await httpx_client.get(
                 'https://google.serper.dev/images',
                 params=params,
@@ -65,6 +67,7 @@ async def fetch_images_from_serper(
             response.raise_for_status()
             data: Dict[str, Any] = response.json()
 
+            # Create a lookup dictionary of source URLs to image URLs
             source_urls: Dict[str, str] = {}
             for image in data.get('images', []):
                 source_urls[image.get('sourceUrl')] = image.get('imageUrl')
@@ -73,17 +76,18 @@ async def fetch_images_from_serper(
             urls_to_try: List[str] = []
 
             for image in data.get('images', [])[:num_images * 2]:
-                image_url: str = image.get('imageUrl')
-                source_url: str = image.get('sourceUrl')
+                image_url: Optional[str] = image.get('imageUrl')
+                source_url: Optional[str] = image.get('sourceUrl')
 
                 if image_url:
                     urls_to_try.append(image_url)
                     image_tasks.append(download_image(image_url, httpx_client, source_url))
 
             if not image_tasks:
-                logger.warning(f"No valid image URLs found for query: {query}")
+                logger.warning(f"No valid image URLs found in Serper results for query: '{query}'")
                 continue
 
+            logger.info(f"Downloading {len(image_tasks)} images for query: '{query}'")
             downloaded_images: List[Optional[bytes]] = await asyncio.gather(*image_tasks)
 
             successful_downloads: int = 0
@@ -101,11 +105,14 @@ async def fetch_images_from_serper(
                 if successful_downloads >= num_images:
                     break
 
+            logger.info(f"Successfully downloaded {successful_downloads} images for query: '{query}'")
+
         except httpx.HTTPError as http_err:
-            logger.error(f"HTTP error while fetching images for query {query}: {http_err}")
+            logger.error(f"HTTP error while fetching images for query '{query}': {http_err}", exc_info=True)
             continue
         except Exception as e:
-            logger.error(f"Error fetching images for query {query}: {e}")
+            logger.error(f"Error fetching images for query '{query}': {e}", exc_info=True)
             continue
 
+    logger.info(f"Completed Serper image fetching: {len(image_files)} files, {len(image_urls)} failed URLs")
     return image_files, image_urls

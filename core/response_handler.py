@@ -55,20 +55,25 @@ class ResponseHandler:
         Returns:
             The created response message
         """
-        response_msg: Message = await progress_message.edit(
-            content=None, 
-            embed=embed, 
-            view=view, 
-            allowed_mentions=allowed_mentions
-        )
-        
-        msg_nodes[response_msg.id] = MsgNode(
-            next_msg=new_msg,
-            internet_used=msg_nodes[new_msg.id].internet_used,
-        )
-        await msg_nodes[response_msg.id].lock.acquire()
-        
-        return response_msg
+        try:
+            logger.info(f"Creating initial response message by editing progress message {progress_message.id}")
+            response_msg: Message = await progress_message.edit(
+                content=None, 
+                embed=embed, 
+                view=view, 
+                allowed_mentions=allowed_mentions
+            )
+            
+            msg_nodes[response_msg.id] = MsgNode(
+                next_msg=new_msg,
+                internet_used=msg_nodes[new_msg.id].internet_used,
+            )
+            await msg_nodes[response_msg.id].lock.acquire()
+            
+            return response_msg
+        except Exception as e:
+            logger.error(f"Error creating response message: {e}", exc_info=True)
+            raise
     
     @staticmethod
     async def create_continuation_message(
@@ -93,20 +98,25 @@ class ResponseHandler:
         Returns:
             The created continuation message
         """
-        response_msg: Message = await prev_msg.reply(
-            embed=embed, 
-            view=view, 
-            mention_author=False, 
-            allowed_mentions=allowed_mentions
-        )
-        
-        msg_nodes[response_msg.id] = MsgNode(
-            next_msg=new_msg,
-            internet_used=msg_nodes[new_msg.id].internet_used,
-        )
-        await msg_nodes[response_msg.id].lock.acquire()
-        
-        return response_msg
+        try:
+            logger.info(f"Creating continuation message as reply to message {prev_msg.id}")
+            response_msg: Message = await prev_msg.reply(
+                embed=embed, 
+                view=view, 
+                mention_author=False, 
+                allowed_mentions=allowed_mentions
+            )
+            
+            msg_nodes[response_msg.id] = MsgNode(
+                next_msg=new_msg,
+                internet_used=msg_nodes[new_msg.id].internet_used,
+            )
+            await msg_nodes[response_msg.id].lock.acquire()
+            
+            return response_msg
+        except Exception as e:
+            logger.error(f"Error creating continuation message: {e}", exc_info=True)
+            raise
     
     @staticmethod
     def prepare_embed(
@@ -187,128 +197,140 @@ class ResponseHandler:
         Returns:
             List of response messages
         """
-        response_msgs: List[Message] = []
-        response_contents: List[str] = []
-        prev_chunk: Any = None
-        edit_task: Optional[asyncio.Task] = None
-        last_task_time: float = dt.now().timestamp()
-        searched_for_text_added: bool = False
-        
-        async for curr_chunk in stream:
-            prev_content: str = (prev_chunk.choices[0].delta.content
-                               if (prev_chunk is not None and prev_chunk.choices[0].delta.content)
-                               else "")
-            curr_content: str = curr_chunk.choices[0].delta.content or ""
+        try:
+            logger.info(f"Handling streaming response for message {user_message_id}")
+            response_msgs: List[Message] = []
+            response_contents: List[str] = []
+            prev_chunk: Any = None
+            edit_task: Optional[asyncio.Task] = None
+            last_task_time: float = dt.now().timestamp()
+            searched_for_text_added: bool = False
             
-            # Process content if we have something to work with
-            if response_contents or prev_content:
-                # Check if we need to start a new message
-                if response_contents == [] or len(response_contents[-1] + prev_content) > max_message_length:
-                    response_contents.append("")
-                    
-                    # Prepare searched_for text for first message only
-                    embed_description: str = ""
-                    if not searched_for_text_added and searched_for_text:
-                        embed_description = searched_for_text
-                        searched_for_text_added = True
-                    
-                    embed_description += response_contents[-1] + prev_content + STREAMING_INDICATOR
-                    
-                    embed: discord.Embed = discord.Embed(
-                        description=embed_description,
-                        color=EMBED_COLOR_INCOMPLETE,
-                    )
-                    
-                    for warning in sorted(user_warnings):
-                        embed.add_field(name=warning, value="", inline=False)
-                    
-                    footer_text: str = f"Model: {config['model']} | " + (
-                        "Internet used" if msg_nodes[user_message_id].internet_used else "Internet NOT used"
-                    )
-                    embed.set_footer(text=footer_text)
-                    
-                    view: OutputView = OutputView(response_contents, user_message_content, serper_queries)
-                    
-                    if not response_msgs:
-                        # First message - edit the progress message
-                        response_msg: Message = await ResponseHandler.create_response_message(
-                            progress_message, embed, view, allowed_mentions, msg_nodes, new_msg
+            async for curr_chunk in stream:
+                prev_content: str = (prev_chunk.choices[0].delta.content
+                                   if (prev_chunk is not None and prev_chunk.choices[0].delta.content)
+                                   else "")
+                curr_content: str = curr_chunk.choices[0].delta.content or ""
+                
+                # Process content if we have something to work with
+                if response_contents or prev_content:
+                    # Check if we need to start a new message
+                    if response_contents == [] or len(response_contents[-1] + prev_content) > max_message_length:
+                        response_contents.append("")
+                        
+                        # Prepare searched_for text for first message only
+                        embed_description: str = ""
+                        if not searched_for_text_added and searched_for_text:
+                            embed_description = searched_for_text
+                            searched_for_text_added = True
+                        
+                        embed_description += response_contents[-1] + prev_content + STREAMING_INDICATOR
+                        
+                        embed: discord.Embed = discord.Embed(
+                            description=embed_description,
+                            color=EMBED_COLOR_INCOMPLETE,
                         )
-                        response_msgs.append(response_msg)
-                        last_task_time = dt.now().timestamp()
-                    else:
-                        # Continuation message
-                        response_msg: Message = await ResponseHandler.create_continuation_message(
-                            response_msgs[-1], embed, view, allowed_mentions, msg_nodes, new_msg
+                        
+                        for warning in sorted(user_warnings):
+                            embed.add_field(name=warning, value="", inline=False)
+                        
+                        footer_text: str = f"Model: {config['model']} | " + (
+                            "Internet used" if msg_nodes[user_message_id].internet_used else "Internet NOT used"
                         )
-                        response_msgs.append(response_msg)
-                        last_task_time = dt.now().timestamp()
+                        embed.set_footer(text=footer_text)
+                        
+                        view: OutputView = OutputView(response_contents, user_message_content, serper_queries)
+                        
+                        if not response_msgs:
+                            # First message - edit the progress message
+                            response_msg: Message = await ResponseHandler.create_response_message(
+                                progress_message, embed, view, allowed_mentions, msg_nodes, new_msg
+                            )
+                            response_msgs.append(response_msg)
+                            last_task_time = dt.now().timestamp()
+                            logger.info(f"Created initial response message {response_msg.id}")
+                        else:
+                            # Continuation message
+                            response_msg: Message = await ResponseHandler.create_continuation_message(
+                                response_msgs[-1], embed, view, allowed_mentions, msg_nodes, new_msg
+                            )
+                            response_msgs.append(response_msg)
+                            last_task_time = dt.now().timestamp()
+                            logger.info(f"Created continuation message {response_msg.id}")
+                    
+                    # Add content to current message
+                    response_contents[-1] += prev_content
+                    
+                    # Check if we need to update the message
+                    finish_reason: Optional[str] = curr_chunk.choices[0].finish_reason
+                    ready_to_edit: bool = (
+                        (edit_task is None or edit_task.done())
+                        and dt.now().timestamp() - last_task_time >= EDIT_DELAY_SECONDS
+                    )
+                    msg_split_incoming: bool = len(response_contents[-1] + curr_content) > max_message_length
+                    is_final_edit: bool = finish_reason is not None or msg_split_incoming
+                    is_good_finish: bool = finish_reason is not None and any(
+                        finish_reason.lower() == x for x in ("stop", "end_turn")
+                    )
+                    
+                    if ready_to_edit or is_final_edit:
+                        if edit_task is not None and not edit_task.done():
+                            await edit_task
+                        
+                        # Prepare embed description with searched_for_text for first message
+                        embed_description: str = ""
+                        if searched_for_text and response_msgs.index(response_msgs[-1]) == 0:
+                            embed_description = searched_for_text
+                        
+                        # Add the content
+                        embed_description += (
+                            response_contents[-1]
+                            if is_final_edit
+                            else (response_contents[-1] + STREAMING_INDICATOR)
+                        )
+                        
+                        # Create embed with appropriate color
+                        embed = discord.Embed(
+                            description=embed_description,
+                            color=(
+                                EMBED_COLOR_COMPLETE
+                                if msg_split_incoming or is_good_finish
+                                else EMBED_COLOR_INCOMPLETE
+                            ),
+                        )
+                        
+                        # Add warnings and footer
+                        for warning in sorted(user_warnings):
+                            embed.add_field(name=warning, value="", inline=False)
+                        
+                        footer_text: str = f"Model: {config['model']} | " + (
+                            "Internet used" if msg_nodes[user_message_id].internet_used else "Internet NOT used"
+                        )
+                        embed.set_footer(text=footer_text)
+                        
+                        # Edit the message
+                        try:
+                            edit_task = asyncio.create_task(
+                                response_msgs[-1].edit(embed=embed, view=view, allowed_mentions=allowed_mentions)
+                            )
+                            last_task_time = dt.now().timestamp()
+                        except Exception as e:
+                            logger.error(f"Error editing message {response_msgs[-1].id}: {e}", exc_info=True)
                 
-                # Add content to current message
-                response_contents[-1] += prev_content
-                
-                # Check if we need to update the message
-                finish_reason: Optional[str] = curr_chunk.choices[0].finish_reason
-                ready_to_edit: bool = (
-                    (edit_task is None or edit_task.done())
-                    and dt.now().timestamp() - last_task_time >= EDIT_DELAY_SECONDS
-                )
-                msg_split_incoming: bool = len(response_contents[-1] + curr_content) > max_message_length
-                is_final_edit: bool = finish_reason is not None or msg_split_incoming
-                is_good_finish: bool = finish_reason is not None and any(
-                    finish_reason.lower() == x for x in ("stop", "end_turn")
-                )
-                
-                if ready_to_edit or is_final_edit:
-                    if edit_task is not None and not edit_task.done():
-                        await edit_task
-                    
-                    # Prepare embed description with searched_for_text for first message
-                    embed_description: str = ""
-                    if searched_for_text and response_msgs.index(response_msgs[-1]) == 0:
-                        embed_description = searched_for_text
-                    
-                    # Add the content
-                    embed_description += (
-                        response_contents[-1]
-                        if is_final_edit
-                        else (response_contents[-1] + STREAMING_INDICATOR)
-                    )
-                    
-                    # Create embed with appropriate color
-                    embed = discord.Embed(
-                        description=embed_description,
-                        color=(
-                            EMBED_COLOR_COMPLETE
-                            if msg_split_incoming or is_good_finish
-                            else EMBED_COLOR_INCOMPLETE
-                        ),
-                    )
-                    
-                    # Add warnings and footer
-                    for warning in sorted(user_warnings):
-                        embed.add_field(name=warning, value="", inline=False)
-                    
-                    footer_text: str = f"Model: {config['model']} | " + (
-                        "Internet used" if msg_nodes[user_message_id].internet_used else "Internet NOT used"
-                    )
-                    embed.set_footer(text=footer_text)
-                    
-                    # Edit the message
-                    edit_task = asyncio.create_task(
-                        response_msgs[-1].edit(embed=embed, view=view, allowed_mentions=allowed_mentions)
-                    )
-                    last_task_time = dt.now().timestamp()
+                # Save current chunk for next iteration
+                prev_chunk = curr_chunk
             
-            # Save current chunk for next iteration
-            prev_chunk = curr_chunk
-        
-        # Update message nodes with final text
-        for response_msg in response_msgs:
-            msg_nodes[response_msg.id].text = "".join(response_contents)
-            msg_nodes[response_msg.id].lock.release()
-        
-        return response_msgs
+            # Update message nodes with final text
+            for response_msg in response_msgs:
+                msg_nodes[response_msg.id].text = "".join(response_contents)
+                msg_nodes[response_msg.id].lock.release()
+            
+            logger.info(f"Completed streaming response, created {len(response_msgs)} message(s)")
+            return response_msgs
+            
+        except Exception as e:
+            logger.error(f"Error handling streaming response: {e}", exc_info=True)
+            raise
     
     @staticmethod
     async def handle_plain_text_response(
@@ -335,37 +357,46 @@ class ResponseHandler:
         Returns:
             List of response messages
         """
-        response_msgs: List[Message] = []
-        view: OutputView = OutputView(response_contents, user_message_content, serper_queries)
-        
-        for content in response_contents:
-            if not response_msgs:
-                # First message - edit the progress message
-                response_msg: Message = await progress_message.edit(
-                    content=content, 
-                    view=view, 
-                    suppress_embeds=True, 
-                    allowed_mentions=allowed_mentions
-                )
-                msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
-                await msg_nodes[response_msg.id].lock.acquire()
-                response_msgs.append(response_msg)
-            else:
-                # Continuation message
-                response_msg: Message = await response_msgs[-1].reply(
-                    content=content, 
-                    view=view, 
-                    suppress_embeds=True, 
-                    mention_author=False, 
-                    allowed_mentions=allowed_mentions
-                )
-                msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
-                await msg_nodes[response_msg.id].lock.acquire()
-                response_msgs.append(response_msg)
-        
-        # Update message nodes with final text
-        for response_msg in response_msgs:
-            msg_nodes[response_msg.id].text = "".join(response_contents)
-            msg_nodes[response_msg.id].lock.release()
-        
-        return response_msgs
+        try:
+            logger.info(f"Handling plain text response for message {new_msg.id}")
+            response_msgs: List[Message] = []
+            view: OutputView = OutputView(response_contents, user_message_content, serper_queries)
+            
+            for i, content in enumerate(response_contents):
+                if not response_msgs:
+                    # First message - edit the progress message
+                    logger.info(f"Creating initial plain text response by editing progress message {progress_message.id}")
+                    response_msg: Message = await progress_message.edit(
+                        content=content, 
+                        view=view, 
+                        suppress_embeds=True, 
+                        allowed_mentions=allowed_mentions
+                    )
+                    msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
+                    await msg_nodes[response_msg.id].lock.acquire()
+                    response_msgs.append(response_msg)
+                else:
+                    # Continuation message
+                    logger.info(f"Creating plain text continuation message as reply to message {response_msgs[-1].id}")
+                    response_msg: Message = await response_msgs[-1].reply(
+                        content=content, 
+                        view=view, 
+                        suppress_embeds=True, 
+                        mention_author=False, 
+                        allowed_mentions=allowed_mentions
+                    )
+                    msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
+                    await msg_nodes[response_msg.id].lock.acquire()
+                    response_msgs.append(response_msg)
+            
+            # Update message nodes with final text
+            for response_msg in response_msgs:
+                msg_nodes[response_msg.id].text = "".join(response_contents)
+                msg_nodes[response_msg.id].lock.release()
+            
+            logger.info(f"Completed plain text response, created {len(response_msgs)} message(s)")
+            return response_msgs
+            
+        except Exception as e:
+            logger.error(f"Error handling plain text response: {e}", exc_info=True)
+            raise

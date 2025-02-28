@@ -40,13 +40,17 @@ async def generate_image(
         - Raw response or None
     """
     try:
+        logger.info(f"Generating image with prompt: '{prompt}', model: {model}, size: {size}")
+        
         # Use provided API key or get from environment
         if not api_key:
             api_key = os.getenv("IMAGE_GEN_API_KEYS", "").split(",")[0]
             if not api_key:
+                logger.error("No image generation API key available")
                 return False, "No image generation API key available", None
         
         # Call the image generation API using run_in_executor since it's not async
+        logger.debug(f"Calling image_generation with model: {model}")
         response = await asyncio.to_thread(
             image_generation,
             prompt=prompt,
@@ -56,16 +60,21 @@ async def generate_image(
             size=size
         )
         
-        logger.debug(f"Image generation response: {response}")
+        logger.debug(f"Image generation response received: {type(response)}")
         
         # Extract the image URL from the response
         if response and response.get('data') and len(response['data']) > 0:
             image_url = response['data'][0].get('url')
             if image_url:
+                logger.info("Successfully generated image, URL received")
                 return True, image_url, response
         
-        return False, "No image URL found in response", response
+        error_message = "No image URL found in response"
+        logger.warning(f"Image generation failed: {error_message}")
+        logger.debug(f"Response content: {response}")
+        return False, error_message, response
         
     except Exception as e:
-        logger.error(f"Error generating image: {str(e)}")
+        error_type = type(e).__name__
+        logger.error(f"Error generating image: {error_type}: {str(e)}", exc_info=True)
         return False, f"Error generating image: {str(e)}", None

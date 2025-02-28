@@ -42,7 +42,7 @@ class GenerateImageCommand:
             name="generateimage",
             description="Generate an image based on a text prompt (format: /generateimage prompt: your prompt here)"
         )
-        async def generateimage(interaction: discord.Interaction, prompt: str) -> None:
+        async def generateimage(interaction: discord.Interaction, prompt: str) -> None:  # type: ignore
             """
             Generate an image based on a text prompt.
             
@@ -55,6 +55,7 @@ class GenerateImageCommand:
             
             # Check if prompt is provided
             if not prompt:
+                logger.warning(f"Empty prompt provided by user {interaction.user.name} ({interaction.user.id})")
                 await interaction.followup.send(
                     "Please provide a prompt for the image. Format: `/generateimage prompt: your prompt here`",
                     ephemeral=True
@@ -68,9 +69,18 @@ class GenerateImageCommand:
             try:
                 # Get API key
                 api_key = await self.get_api_key()
+                if not api_key:
+                    logger.error("No API key available for image generation")
+                    await interaction.followup.send(
+                        "Error: No API key available for image generation. Please check your configuration.",
+                        ephemeral=True
+                    )
+                    return
+                
+                logger.info(f"Generating image with prompt: '{prompt}' for user {interaction.user.name} ({interaction.user.id})")
                 
                 # Generate the image
-                success, result, _ = await generate_image(
+                success, result, response_data = await generate_image(
                     prompt=prompt,
                     httpx_client=self.client.httpx_client,
                     api_key=api_key
@@ -86,16 +96,18 @@ class GenerateImageCommand:
                     embed.set_image(url=result)
                     
                     # Send the image
+                    logger.info(f"Successfully generated image for prompt: '{prompt}'")
                     await interaction.followup.send(embed=embed)
                 else:
                     # Send error message
+                    logger.warning(f"Failed to generate image: {result}")
                     await interaction.followup.send(
                         f"Failed to generate image: {result}",
                         ephemeral=True
                     )
             
             except Exception as e:
-                logger.exception(f"Error in generateimage command: {e}")
+                logger.error(f"Error in generateimage command for user {interaction.user.name} ({interaction.user.id}): {e}", exc_info=True)
                 await interaction.followup.send(
                     f"An error occurred: {str(e)}",
                     ephemeral=True
@@ -110,8 +122,12 @@ class GenerateImageCommand:
         """
         try:
             # Try to get from API key manager
-            return await self.api_key_manager.get_next_api_key("image_gen")
-        except:
+            api_key = await self.api_key_manager.get_next_api_key("image_gen")
+            if not api_key:
+                logger.warning("No image generation API key available from API key manager")
+            return api_key
+        except Exception as e:
+            logger.error(f"Error retrieving image generation API key: {e}", exc_info=True)
             # Fallback to environment variable
             return None
 
@@ -128,5 +144,6 @@ def setup_generateimage_command(client: discord.Client, api_key_manager: APIKeyM
     Returns:
         Command handler instance
     """
+    logger.info("Setting up /generateimage command")
     command = GenerateImageCommand(client, api_key_manager, command_tree)
     return command

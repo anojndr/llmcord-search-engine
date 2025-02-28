@@ -168,13 +168,21 @@ class LLMService:
                     yield chunk
                 
                 # If we get here without exceptions, the stream was successful
+                logger.info(f"LLM completion stream completed successfully using provider: {provider}")
                 return
                 
             except Exception as e:
                 retry_count += 1
-                logger.exception(
-                    f"Error during LLM request (attempt {retry_count}/{max_retries}): {str(e)}"
-                )
+                error_type = type(e).__name__
+                if "rate limit" in str(e).lower() or "too many requests" in str(e).lower():
+                    logger.warning(
+                        f"Rate limit exceeded during LLM request (attempt {retry_count}/{max_retries}) for provider {provider}: {str(e)}"
+                    )
+                else:
+                    logger.error(
+                        f"Error during LLM request (attempt {retry_count}/{max_retries}) for provider {provider}: {error_type}: {str(e)}",
+                        exc_info=True
+                    )
                 
                 if retry_count >= max_retries:
                     # Re-raise the exception on the last retry
@@ -211,5 +219,6 @@ class LLMService:
             stream = LLMService.stream_completion(messages, config, api_key)
             return True, stream
         except Exception as e:
-            logger.exception(f"Failed to get LLM completion: {str(e)}")
+            error_type = type(e).__name__
+            logger.error(f"Failed to get LLM completion: {error_type}: {str(e)}", exc_info=True)
             return False, None

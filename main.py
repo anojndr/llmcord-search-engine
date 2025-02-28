@@ -12,11 +12,13 @@ from discord import Game
 from utils.keep_alive import keep_alive
 from config.config_manager import get_config
 from core.bot_client import BotClient
+from logging_config import setup_logging  # Import the setup_logging function
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s: %(message)s",
-)
+# Initialize logging
+setup_logging("INFO")  # This will set up logging with INFO level and include the warnings_errors_criticals.txt file
+
+# Define logger for this module
+logger = logging.getLogger(__name__)
 
 async def main() -> None:
     """
@@ -37,8 +39,17 @@ async def main() -> None:
     discord_client: BotClient = BotClient(intents=intents, activity=activity)
     
     try:
+        if not cfg["bot_token"]:
+            logger.critical("Missing bot token in configuration")
+            raise ValueError("Bot token is required but not provided in configuration")
+        
+        logger.info("Starting Discord bot with provided configuration")
         await discord_client.start(cfg["bot_token"])
+    except Exception as e:
+        logger.critical(f"Failed to start Discord bot: {str(e)}", exc_info=True)
+        raise
     finally:
+        logger.info("Closing Discord client")
         await discord_client.close()
 
 if __name__ == "__main__":

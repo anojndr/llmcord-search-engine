@@ -32,13 +32,22 @@ def extract_video_id(url: str) -> Optional[str]:
     Returns:
         The extracted video ID, or None if it cannot be found.
     """
+    if not url:
+        logger.warning("Empty URL provided to extract_video_id")
+        return None
+        
+    logger.debug(f"Extracting video ID from URL: {url}")
+    
+    # First try the query parameter approach (most common)
     parsed_url = urlparse(url)
     query_params = parse_qs(parsed_url.query)
     if "v" in query_params and query_params["v"]:
         extracted: str = query_params["v"][0]
         if extracted:
+            logger.debug(f"Extracted video ID from query parameter: {extracted}")
             return extracted
 
+    # Try various URL patterns
     patterns: List[str] = [
         r'youtu\.be/([^/?&]+)',
         r'youtube\.com/watch\?v=([^&]+)',
@@ -46,10 +55,15 @@ def extract_video_id(url: str) -> Optional[str]:
         r'youtube\.com/v/([^/?&]+)',
         r'youtube\.com/shorts/([^/?&]+)'
     ]
+    
     for pattern in patterns:
         match = re.search(pattern, url)
         if match:
-            return match.group(1)
+            video_id = match.group(1)
+            logger.debug(f"Extracted video ID using pattern {pattern}: {video_id}")
+            return video_id
+    
+    logger.warning(f"Could not extract video ID from URL: {url}")
     return None
 
 def format_duration(duration_str: str) -> str:
@@ -62,8 +76,12 @@ def format_duration(duration_str: str) -> str:
     Returns:
         Human-readable duration.
     """
+    if not duration_str:
+        return "Unknown duration"
+        
     match = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', duration_str)
     if not match:
+        logger.warning(f"Could not parse duration string: {duration_str}")
         return "Unknown duration"
 
     hours, minutes, seconds = match.groups()
@@ -76,7 +94,9 @@ def format_duration(duration_str: str) -> str:
     if seconds:
         parts.append(f"{int(seconds)} second{'s' if seconds != '1' else ''}")
 
-    return ", ".join(parts)
+    formatted = ", ".join(parts)
+    logger.debug(f"Formatted duration '{duration_str}' to '{formatted}'")
+    return formatted
 
 def get_comments(youtube, video_id: str, max_comments: int = 50) -> List[Dict[str, Any]]:
     """
@@ -92,6 +112,7 @@ def get_comments(youtube, video_id: str, max_comments: int = 50) -> List[Dict[st
     """
     comments: List[Dict[str, Any]] = []
     try:
+        logger.info(f"Fetching comments for video ID: {video_id}")
         comment_response = youtube.commentThreads().list(
             part='snippet',
             videoId=video_id,
@@ -101,7 +122,10 @@ def get_comments(youtube, video_id: str, max_comments: int = 50) -> List[Dict[st
         ).execute()
 
         while comment_response and len(comments) < max_comments:
-            for item in comment_response.get('items', []):
+            batch_items = comment_response.get('items', [])
+            logger.debug(f"Retrieved {len(batch_items)} comments in this batch")
+            
+            for item in batch_items:
                 comment_data = item['snippet']['topLevelComment']['snippet']
                 comment = {
                     'text': html.unescape(comment_data.get('textDisplay', '')),
@@ -114,24 +138,39 @@ def get_comments(youtube, video_id: str, max_comments: int = 50) -> List[Dict[st
                     break
 
             if len(comments) < max_comments and 'nextPageToken' in comment_response:
+                next_page_token = comment_response['nextPageToken']
+                logger.debug(f"Fetching next page of comments with token: {next_page_token}")
                 comment_response = youtube.commentThreads().list(
                     part='snippet',
                     videoId=video_id,
-                    pageToken=comment_response['nextPageToken'],
+                    pageToken=next_page_token,
                     maxResults=100,
                     textFormat='plainText',
                     order='relevance'
                 ).execute()
             else:
                 break
+        
+        logger.info(f"Successfully fetched {len(comments)} comments for video ID: {video_id}")
+        
+    except HttpError as e:
+        error_reason = "Comments disabled" if e.status_code == 403 else str(e)
+        logger.warning(f"Error fetching comments for video {video_id}: {error_reason}")
+        comments.append({
+            'text': f"Error fetching comments: {error_reason}",
+            'author': 'System',
+            'like_count': 0,
+            'published_at': ''
+        })
     except Exception as e:
-        logger.warning(f"Error fetching comments: {e}")
+        logger.error(f"Unexpected error fetching comments for video {video_id}: {e}", exc_info=True)
         comments.append({
             'text': f"Error fetching comments: {str(e)}",
             'author': 'System',
             'like_count': 0,
             'published_at': ''
         })
+    
     return comments
 
 async def fetch_youtube_content(
@@ -155,16 +194,22 @@ async def fetch_youtube_content(
     """
     video_id: Optional[str] = extract_video_id(url)
     if not video_id:
-        return "Error: Could not extract video ID from URL."
+        error_msg = f"Could not extract video ID from URL: {url}"
+        logger.error(error_msg)
+        return f"Error: {error_msg}"
 
     api_key: Optional[str] = await api_key_manager.get_next_api_key('youtube')
     if not api_key or api_key.strip() == "":
-        return "Error: No YouTube API key available. Make sure 'youtube_api_keys' is set in your configuration."
+        error_msg = "No YouTube API key available. Make sure 'youtube_api_keys' is set in your configuration."
+        logger.error(error_msg)
+        return f"Error: {error_msg}"
 
     try:
+        logger.info(f"Building YouTube API client for video ID: {video_id}")
         youtube = build('youtube', 'v3', developerKey=api_key)
 
         # Fetch metadata first (required to check if video exists)
+        logger.info(f"Fetching video metadata for video ID: {video_id}")
         metadata_response = await asyncio.to_thread(
             youtube.videos().list(
                 part='snippet,contentDetails,statistics,status',
@@ -173,7 +218,9 @@ async def fetch_youtube_content(
         )
 
         if not metadata_response.get('items'):
-            return "Error: Video not found (may be deleted, private, or region-restricted)."
+            error_msg = "Video not found (may be deleted, private, or region-restricted)"
+            logger.warning(f"{error_msg} for video ID: {video_id}")
+            return f"Error: {error_msg}"
 
         video_data: Dict[str, Any] = metadata_response['items'][0]
         snippet: Dict[str, Any] = video_data['snippet']
@@ -191,23 +238,36 @@ async def fetch_youtube_content(
             'description': html.unescape(snippet.get('description', '')),
             'tags': ', '.join([html.unescape(tag) for tag in snippet.get('tags', [])])
         }
+        
+        logger.info(f"Successfully fetched metadata for '{metadata['title']}' by {metadata['channel']}")
 
         # Define async function for fetching transcript
         async def fetch_transcript() -> str:
             try:
+                logger.info(f"Fetching transcript for video ID: {video_id}")
                 def get_transcript():
-                    transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
-                    transcript_obj = transcripts.find_transcript(['en'])
-                    return transcript_obj.fetch()
+                    try:
+                        transcripts = YouTubeTranscriptApi.list_transcripts(video_id)
+                        transcript_obj = transcripts.find_transcript(['en'])
+                        return transcript_obj.fetch()
+                    except Exception as e:
+                        logger.warning(f"Error in get_transcript: {e}")
+                        return []
 
                 transcript = await asyncio.to_thread(get_transcript)
-                captions: str = ' '.join(html.unescape(t['text']) for t in transcript)
-                return captions
+                if transcript:
+                    captions: str = ' '.join(html.unescape(t['text']) for t in transcript)
+                    logger.info(f"Successfully fetched transcript ({len(captions)} characters)")
+                    return captions
+                else:
+                    logger.warning(f"No transcript data returned for video ID: {video_id}")
+                    return "No captions available for this video."
             except Exception as e:
-                logger.warning(f"Error fetching transcript: {e}")
+                logger.error(f"Error fetching transcript for video ID {video_id}: {e}", exc_info=True)
                 return "No captions available for this video."
 
         # Fetch transcript and comments concurrently
+        logger.info(f"Starting concurrent tasks: transcript and comments for video ID: {video_id}")
         transcript_task = fetch_transcript()
         comments_task = asyncio.to_thread(get_comments, youtube, video_id, max_comments)
 
@@ -233,11 +293,16 @@ async def fetch_youtube_content(
             lines.append(f"Author: {comment['author']} | Published: {comment['published_at']} | Likes: {comment['like_count']}")
             lines.append(comment['text'])
             lines.append("")
-        return "\n".join(lines)
+        
+        result = "\n".join(lines)
+        logger.info(f"Successfully completed YouTube content fetch for video ID: {video_id}")
+        return result
 
     except HttpError as http_err:
-        logger.exception("HttpError while trying to fetch YouTube data.")
-        return f"Error fetching YouTube content (HTTP error): {str(http_err)}"
+        error_msg = f"HttpError while trying to fetch YouTube data: {http_err}"
+        logger.error(error_msg, exc_info=True)
+        return f"Error fetching YouTube content: {error_msg}"
     except Exception as e:
-        logger.exception("General error while fetching YouTube content.")
-        return f"Error fetching YouTube content: {str(e)}"
+        error_msg = f"General error while fetching YouTube content: {e}"
+        logger.error(error_msg, exc_info=True)
+        return f"Error fetching YouTube content: {error_msg}"

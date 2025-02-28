@@ -37,6 +37,8 @@ async def split_query(
     Returns:
         A list of queries (strings) as parsed from the model's JSON output.
     """
+    logger.info(f"Processing query for potential splitting: '{query}'")
+    
     query_splitter_prompt: str = '''Your task is to determine if the query implies a comparison between multiple entities.
 
 If it does, decompose it into separate queries focusing on each entity, along with the original comparison query.
@@ -77,10 +79,14 @@ Output:
 
     query_splitter_provider: str = cfg.get('query_splitter_provider', 'openai')
     query_splitter_model: str = cfg.get('query_splitter_model', 'gpt-4')
+    
+    # Get API key
     api_key: str = await api_key_manager.get_next_api_key(query_splitter_provider)
     if not api_key:
+        logger.warning(f"No API key available for query splitter provider: {query_splitter_provider}, using placeholder")
         api_key = 'sk-no-key-required'
 
+    # Prepare LLM request
     messages: List[Dict[str, str]] = [
         {"role": "system", "content": "You are a concise assistant."},
         {"role": "user", "content": formatted_prompt}
@@ -94,7 +100,9 @@ Output:
         **cfg.get("query_splitter_extra_api_parameters", {})
     }
 
+    # Add safety settings for Google models
     if query_splitter_provider == "google":
+        logger.debug("Adding safety settings for Google query splitter model")
         kwargs["safety_settings"] = [
             {
                 "category": "HARM_CATEGORY_HARASSMENT",
@@ -118,53 +126,78 @@ Output:
             }
         ]
 
+    # Log request (redacted for sensitive info)
     logging_kwargs: Dict[str, Any] = json.loads(json.dumps(kwargs, default=str))
-    for message in logging_kwargs.get('messages', []):
-        if isinstance(message.get('content'), list):
-            for item in message['content']:
-                if item.get('type') == 'image_url' and 'url' in item.get('image_url', {}):
-                    item['image_url']['url'] = truncate_base64(item['image_url']['url'])
-        elif isinstance(message.get('content'), str):
-            pass
+    if 'api_key' in logging_kwargs:
+        api_key_str = logging_kwargs['api_key']
+        if isinstance(api_key_str, str) and len(api_key_str) > 8:
+            logging_kwargs['api_key'] = api_key_str[:4] + '...' + api_key_str[-4:]
+    
+    logger.debug(f"Query splitter request: provider={query_splitter_provider}, model={query_splitter_model}")
 
-    logger.info(f"Payload being sent to LLM API for query_splitter:\n{json.dumps(logging_kwargs, indent=2, default=str)}")
-
+    # Call the model with retries
     max_retries: int = 5
     response: Any = None
+    
     for i in range(max_retries):
         try:
-            logger.info("Attempt %d for query splitter using API key: %s", i+1, kwargs.get("api_key"))
+            logger.info(f"Query splitter attempt {i+1}/{max_retries} using provider: {query_splitter_provider}")
             response = await acompletion(**kwargs)
             break
         except Exception as e:
-            logger.exception("Error while calling query_splitter model, retrying with new API key. Attempt %d/%d", i+1, max_retries)
-            kwargs["api_key"] = await api_key_manager.get_next_api_key(query_splitter_provider)
+            error_type = type(e).__name__
+            if "rate limit" in str(e).lower() or "too many requests" in str(e).lower():
+                logger.warning(f"Rate limit exceeded for query splitter (attempt {i+1}/{max_retries}): {str(e)}")
+            else:
+                logger.error(f"Error calling query splitter model (attempt {i+1}/{max_retries}): {error_type}: {str(e)}", 
+                             exc_info=True)
+            
+            # Get a new API key for next attempt
+            new_api_key = await api_key_manager.get_next_api_key(query_splitter_provider)
+            if new_api_key:
+                kwargs["api_key"] = new_api_key
+                logger.info(f"Retrying with new API key for {query_splitter_provider}")
+            
+            # On last attempt, return original query
             if i == max_retries - 1:
+                logger.warning(f"All query splitter attempts failed, returning original query")
                 return [query]
 
     if response is None:
+        logger.warning("No response from query splitter, returning original query")
         return [query]
 
+    # Process the response
     content: str = response.choices[0].message.content.strip()
     try:
+        # Try to extract JSON array from response
         match = re.search(r'\[.*\]', content, re.DOTALL)
         if match:
             json_content: str = match.group(0)
             queries: List[str] = json.loads(json_content)
+            
             if isinstance(queries, list) and all(isinstance(q, str) for q in queries):
+                logger.info(f"Query successfully split into {len(queries)} queries")
+                for i, q in enumerate(queries):
+                    logger.debug(f"Query {i+1}: {q}")
                 return queries
             else:
-                logger.warning("Invalid JSON array format in query_splitter response.")
+                logger.warning(f"Invalid JSON array format in query_splitter response: {json_content}")
                 return [query]
         else:
-            logger.warning("No JSON array found in query_splitter response.")
+            logger.warning(f"No JSON array found in query_splitter response: {content}")
             return [query]
-    except json.JSONDecodeError:
-        logger.warning("Failed to parse JSON in query_splitter response.")
+    except json.JSONDecodeError as e:
+        logger.error(f"Failed to parse JSON in query_splitter response: {e}, content: {content}", exc_info=True)
+        return [query]
+    except Exception as e:
+        logger.error(f"Unexpected error processing query_splitter response: {e}", exc_info=True)
         return [query]
 
 def truncate_base64(base64_string: str, max_length: int = 50) -> str:
     """Utility function to truncate long base64 strings for logging purposes."""
+    if not base64_string:
+        return ""
     if len(base64_string) > max_length:
         return base64_string[:max_length] + "..."
     return base64_string

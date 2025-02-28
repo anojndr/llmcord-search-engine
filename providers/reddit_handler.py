@@ -36,6 +36,12 @@ def get_reddit_instance() -> asyncpraw.Reddit:
         "REDDIT_USER_AGENT",
         "llmcord_reddit_extractor (by /u/yourusername)"
     )
+    
+    if not client_id or not client_secret:
+        logger.warning("Reddit API credentials not properly configured")
+    
+    logger.debug(f"Creating Reddit instance with client_id={client_id[:4]}... and user_agent={user_agent}")
+    
     return asyncpraw.Reddit(
         client_id=client_id,
         client_secret=client_secret,
@@ -54,18 +60,26 @@ def parse_comments(comments: Any) -> List[Dict[str, Any]]:
         List of parsed comment data.
     """
     comment_list: List[Dict[str, Any]] = []
-    for comment in comments:
-        if isinstance(comment, asyncpraw.models.Comment):
-            if comment.body:
-                comment_data: Dict[str, Any] = {
-                    'body': html.escape(comment.body),
-                    'author': html.escape(comment.author.name) if comment.author else "[deleted]",
-                    'score': comment.score or 0,
-                    'created_utc': comment.created_utc or 0
-                }
-                comment_list.append(comment_data)
-            if hasattr(comment, "replies"):
-                comment_list.extend(parse_comments(comment.replies))
+    try:
+        comment_count = 0
+        for comment in comments:
+            if isinstance(comment, asyncpraw.models.Comment):
+                if comment.body:
+                    comment_data: Dict[str, Any] = {
+                        'body': html.escape(comment.body),
+                        'author': html.escape(comment.author.name) if comment.author else "[deleted]",
+                        'score': comment.score or 0,
+                        'created_utc': comment.created_utc or 0
+                    }
+                    comment_list.append(comment_data)
+                    comment_count += 1
+                if hasattr(comment, "replies"):
+                    comment_list.extend(parse_comments(comment.replies))
+        
+        logger.debug(f"Parsed {comment_count} comments at this level")
+    except Exception as e:
+        logger.error(f"Error parsing Reddit comments: {e}", exc_info=True)
+    
     return comment_list
 
 async def fetch_reddit_content(
@@ -87,11 +101,15 @@ async def fetch_reddit_content(
     Returns:
         A plain text string containing the submission details and comments.
     """
+    logger.info(f"Fetching Reddit content from URL: {url}")
     reddit: asyncpraw.Reddit = get_reddit_instance()
+    
     try:
+        logger.debug("Creating submission object")
         submission: asyncpraw.models.Submission = await reddit.submission(url=url)
         await submission.load()
 
+        # Extract submission metadata
         title: str = submission.title or ""
         selftext: str = submission.selftext or ""
         author: str = submission.author.name if submission.author else "[deleted]"
@@ -99,11 +117,19 @@ async def fetch_reddit_content(
         created_utc: float = submission.created_utc or 0
         num_comments: int = submission.num_comments or 0
         subreddit: str = submission.subreddit.display_name if submission.subreddit else ""
+        
+        logger.info(f"Found Reddit post: '{title[:50]}{'...' if len(title) > 50 else ''}' with {num_comments} comments in r/{subreddit}")
 
+        # Replace "More Comments" buttons with actual comments
+        logger.debug("Replacing 'more comments' expandable buttons with actual comments")
         await submission.comments.replace_more(limit=0)
-        # Offload comment parsing to a thread
+        
+        # Offload comment parsing to a thread to avoid blocking
+        logger.debug("Parsing comments in a separate thread")
         comment_list: List[Dict[str, Any]] = await asyncio.to_thread(parse_comments, submission.comments)
+        logger.info(f"Successfully parsed {len(comment_list)} comments")
 
+        # Format the output
         lines: List[str] = []
         lines.append(f"Post Title: {title}")
         lines.append(f"Author: {author}  |  Subreddit: {subreddit}")
@@ -113,15 +139,21 @@ async def fetch_reddit_content(
         lines.append(selftext)
         lines.append("")
         lines.append("Comments:")
+        
         for comment in comment_list:
             lines.append("-----------------")
             lines.append(f"Author: {comment['author']} | Score: {comment['score']} | Posted (UTC): {comment['created_utc']}")
             lines.append(comment['body'])
             lines.append("")
+        
         return "\n".join(lines)
 
+    except asyncpraw.exceptions.RedditAPIException as api_err:
+        logger.error(f"Reddit API error for URL '{url}': {api_err}", exc_info=True)
+        return f"Error fetching Reddit content: Reddit API error - {api_err}"
     except Exception as e:
-        logger.exception("Error fetching Reddit content: %s", e)
+        logger.error(f"Error fetching Reddit content from URL '{url}': {e}", exc_info=True)
         return f"Error fetching Reddit content: {e}"
     finally:
+        logger.debug("Closing Reddit client session")
         await reddit.close()

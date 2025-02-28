@@ -43,9 +43,14 @@ async def fetch_images_and_update_views(
         msg_nodes: Dictionary of message nodes
     """
     try:
+        logger.info(f"Fetching images for {len(split_queries)} queries: {', '.join(split_queries)}")
         image_files_dict: Dict[str, List[File]]
         image_urls_dict: Dict[str, List[str]]
         image_files_dict, image_urls_dict = await fetch_images(split_queries, 5, api_key_manager, httpx_client)
+        
+        total_images = sum(len(files) for files in image_files_dict.values())
+        total_urls = sum(len(urls) for urls in image_urls_dict.values())
+        logger.info(f"Fetched {total_images} images and {total_urls} image URLs")
 
         # Update the user message node with the fetched images
         if user_msg_id in msg_nodes:
@@ -66,6 +71,8 @@ async def fetch_images_and_update_views(
                     try:
                         await response_msg.edit(view=new_view)
                     except Exception as edit_error:
-                        logger.error(f"Error updating message {response_msg.id} with images: {edit_error}")
+                        logger.error(f"Error updating message {response_msg.id} with images: {edit_error}", exc_info=True)
+        else:
+            logger.warning(f"User message ID {user_msg_id} not found in msg_nodes when updating images")
     except Exception as e:
-        logger.error(f"Error in image fetch background task: {e}")
+        logger.error(f"Error in image fetch background task: {e}", exc_info=True)

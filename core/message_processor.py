@@ -255,18 +255,24 @@ async def build_conversation_context(
             
             # Add warnings if needed
             if len(curr_node.text) > max_text:
+                warning_msg = f"Max text limit exceeded: {len(curr_node.text)} > {max_text} characters in message {curr_msg.id}"
+                logger.warning(warning_msg)
                 user_warnings.add(f"⚠️ Max {max_text:,} characters per message")
             if len(curr_node.images) > max_images:
+                warning_msg = f"Max images limit exceeded: {len(curr_node.images)} > {max_images} in message {curr_msg.id}"
+                logger.warning(warning_msg)
                 user_warnings.add(
                     f"⚠️ Max {max_images} image{'' if max_images == 1 else 's'} per message"
                     if max_images > 0
                     else "⚠️ Can't see images"
                 )
             if curr_node.has_bad_attachments:
+                logger.warning(f"Unsupported attachments detected in message {curr_msg.id}")
                 user_warnings.add("⚠️ Unsupported attachments")
             if curr_node.fetch_next_failed or (
                 curr_node.next_msg is not None and len(messages) == max_messages
             ):
+                logger.warning(f"Message chain length limit reached ({max_messages}) for message {curr_msg.id}")
                 user_warnings.add(
                     f"⚠️ Only using last {len(messages)} message{'' if len(messages) == 1 else 's'}"
                 )
@@ -315,6 +321,8 @@ async def handle_lens_sauce_commands(
     """
     if not new_msg.attachments:
         service_name: str = "Google Lens" if cmd_type == "lens" else "SauceNAO"
+        error_msg = f"No image attachment for the {service_name} search in message {new_msg.id}"
+        logger.warning(error_msg)
         return f"Please attach an image for the {service_name} search."
     
     image_attachment: discord.Attachment = new_msg.attachments[0]
@@ -322,6 +330,7 @@ async def handle_lens_sauce_commands(
     
     try:
         if cmd_type == "lens":
+            logger.info(f"Processing Google Lens search for image in message {new_msg.id}")
             lens_results: Dict[str, Any] = await get_google_lens_results(
                 image_url, api_key_manager, httpx_client
             )
@@ -330,12 +339,15 @@ async def handle_lens_sauce_commands(
             )
             results_tag: str = 'lens results'
         else:  # sauce
+            logger.info(f"Processing SauceNAO search for image in message {new_msg.id}")
             formatted_results: str = await handle_saucenao_query(
                 image_url, api_key_manager, httpx_client
             )
             results_tag: str = 'saucenao results'
     except Exception as e:
         service_name: str = "Google Lens" if cmd_type == "lens" else "SauceNAO"
+        error_msg = f"Error calling {service_name} API for message {new_msg.id}: {str(e)}"
+        logger.error(error_msg, exc_info=True)
         return f"Error calling {service_name} API: {str(e)}"
     
     user_content: str = new_msg.content
@@ -363,6 +375,7 @@ async def handle_lens_sauce_commands(
     
     msg_nodes[new_msg.id].text = augmented_user_message
     msg_nodes[new_msg.id].internet_used = True
+    logger.info(f"Successfully processed {cmd_type} command for message {new_msg.id}")
     
     return None
 
@@ -391,6 +404,7 @@ async def handle_regular_message(
     
     if urls_in_message:
         # Handle URL content extraction
+        logger.info(f"Found {len(urls_in_message)} URLs in message {new_msg.id}")
         contents: List[str] = await fetch_urls_content(
             urls_in_message, api_key_manager, httpx_client, config=config
         )
@@ -406,15 +420,20 @@ async def handle_regular_message(
             )
     else:
         # Handle web search if needed
+        logger.info(f"Checking if web search is needed for message {new_msg.id}")
         latest_user_query: str = await rephrase_query(messages, config, api_key_manager)
         if latest_user_query != 'not_needed':
+            logger.info(f"Web search needed for message {new_msg.id}, query: {latest_user_query}")
             split_queries: List[str] = await split_query(latest_user_query, config, api_key_manager)
             msg_nodes[new_msg.id].serper_queries = split_queries
             msg_nodes[new_msg.id].internet_used = True
+            logger.info(f"Split into {len(split_queries)} queries: {split_queries}")
             aggregated_results: str = await handle_search_queries(
                 split_queries, api_key_manager, httpx_client, config=config
             )
             augmented_user_message = f"User Query: {html.escape(new_msg.content)}\n\n{aggregated_results}"
+        else:
+            logger.info(f"Web search not needed for message {new_msg.id}")
     
     # Update user message with search results or URL content
     if augmented_user_message:

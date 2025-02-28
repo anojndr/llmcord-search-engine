@@ -11,6 +11,7 @@ Synchronous parsing operations are offloaded to threads for concurrency.
 
 import asyncio
 import re
+import logging
 from typing import List, Optional, Dict, Any
 from bs4 import BeautifulSoup, Comment
 import httpx
@@ -20,6 +21,9 @@ from io import BytesIO
 from config.api_key_manager import APIKeyManager
 from providers.youtube_handler import fetch_youtube_content
 from providers.reddit_handler import fetch_reddit_content
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 def extract_urls_from_text(text: str) -> List[str]:
     """
@@ -122,8 +126,10 @@ async def fetch_single_url_content(url: str, api_key_manager: APIKeyManager, htt
                     text_content: str = response.text[:20000]
                     return text_content
             except Exception as e:
+                logger.error(f"Error fetching content from {url}: {e}")
                 return f"Error fetching content from {url}: {e}"
         except Exception as e:
+            logger.error(f"Error fetching content with jina_ai from {url}: {e}")
             return f"Error fetching content with jina_ai from {url}: {e}"
 
 async def fetch_urls_content(

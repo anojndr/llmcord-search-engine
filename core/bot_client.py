@@ -49,6 +49,7 @@ class BotClient(discord.Client):
     
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        logger.info("Initializing BotClient")
         self.httpx_client = httpx.AsyncClient(http2=True)
         self.msg_nodes: Dict[int, MsgNode] = {}
         self.command_manager = None
@@ -59,6 +60,7 @@ class BotClient(discord.Client):
     def initialize_resources(self) -> None:
         """Initialize bot resources such as API key manager."""
         # Initialize API key manager
+        logger.info("Initializing bot resources")
         cfg = get_config()
         self.api_key_manager = APIKeyManager(cfg)
         
@@ -67,6 +69,8 @@ class BotClient(discord.Client):
             logger.info(
                 f"\n\nBOT INVITE URL:\nhttps://discord.com/api/oauth2/authorize?client_id={client_id}&permissions=412317273088&scope=bot\n"
             )
+        else:
+            logger.warning("No client_id found in config, can't generate invite URL")
 
         # Set up slash commands
         self.command_manager = setup_commands(self, self.api_key_manager)
@@ -81,11 +85,14 @@ class BotClient(discord.Client):
             if self.command_manager:
                 await self.command_manager.sync_commands()
                 logger.info("Slash commands synchronized successfully")
+            else:
+                logger.error("Command manager is not initialized, can't sync commands")
         except Exception as e:
-            logger.error(f"Error syncing commands: {e}")
+            logger.error(f"Error syncing commands: {e}", exc_info=True)
     
     async def close(self) -> None:
         """Close the bot client and all resources."""
+        logger.info("Closing bot client and resources")
         if self.httpx_client:
             await self.httpx_client.aclose()
         await super().close()
@@ -159,6 +166,12 @@ class BotClient(discord.Client):
             )
         )
         
+        if is_bad_channel:
+            logger.warning(f"Message from {message.author.name} ({message.author.id}) in channel {message.channel.id} rejected - channel not allowed")
+        
+        if is_bad_user:
+            logger.warning(f"Message from {message.author.name} ({message.author.id}) rejected - user not allowed or blocked")
+        
         return not (is_bad_channel or is_bad_user)
     
     def clean_message_content(self, message: Message) -> None:
@@ -205,6 +218,8 @@ class BotClient(discord.Client):
         if not self.should_process_message(new_msg):
             return
         
+        logger.info(f"Processing message from {new_msg.author.name} ({new_msg.author.id}) in channel {new_msg.channel.id}")
+        
         # Clean message content
         self.clean_message_content(new_msg)
         
@@ -226,6 +241,7 @@ class BotClient(discord.Client):
             # Get API key
             api_key: str = await self.api_key_manager.get_next_api_key(cfg["provider"])
             if not api_key:
+                logger.warning(f"No API key available for provider '{cfg['provider']}', using placeholder")
                 api_key = 'sk-no-key-required'
             
             # Calculate message limits
@@ -235,6 +251,7 @@ class BotClient(discord.Client):
             )
             
             # Build conversation context
+            logger.info(f"Building conversation context for message {new_msg.id}")
             messages, user_warnings = await build_conversation_context(
                 new_msg,
                 self.user,
@@ -250,6 +267,7 @@ class BotClient(discord.Client):
             # Check for special commands
             cmd_type = self.is_special_command(new_msg)
             if cmd_type in ("lens", "sauce"):
+                logger.info(f"Handling {cmd_type} command for message {new_msg.id}")
                 error = await handle_lens_sauce_commands(
                     new_msg,
                     cmd_type,
@@ -260,10 +278,12 @@ class BotClient(discord.Client):
                     cfg
                 )
                 if error:
+                    logger.warning(f"Error handling {cmd_type} command: {error}")
                     await progress_message.edit(content=error, allowed_mentions=allowed_mentions)
                     return
             else:
                 # Process regular message
+                logger.info(f"Handling regular message for message {new_msg.id}")
                 await handle_regular_message(
                     new_msg,
                     self.msg_nodes,
@@ -278,12 +298,15 @@ class BotClient(discord.Client):
             if serper_queries:
                 search_queries_text = ', '.join(f'"{q}"' for q in serper_queries)
                 searched_for_text = f"Searched for: {search_queries_text}\n\n"
+                logger.info(f"Searched for: {search_queries_text}")
             else:
                 searched_for_text = ''
             
             # Get LLM response
+            logger.info(f"Getting LLM completion for message {new_msg.id}")
             success, stream = await LLMService.get_completion(messages, cfg, api_key)
             if not success:
+                logger.error("Failed to get LLM completion (likely rate limit exceeded)")
                 await progress_message.edit(
                     content="An error occurred while processing your request (rate limit exceeded).",
                     allowed_mentions=allowed_mentions
@@ -293,6 +316,7 @@ class BotClient(discord.Client):
             # Handle the response
             if use_plain_responses:
                 # Handle plain text response (non-streaming)
+                logger.info(f"Handling plain text response for message {new_msg.id}")
                 response_contents = []
                 prev_chunk = None
                 
@@ -320,6 +344,7 @@ class BotClient(discord.Client):
                 )
             else:
                 # Handle streaming response
+                logger.info(f"Handling streaming response for message {new_msg.id}")
                 response_msgs = await ResponseHandler.handle_streaming_response(
                     stream,
                     progress_message,
@@ -337,6 +362,7 @@ class BotClient(discord.Client):
             
             # Manage message node cache size
             if (num_nodes := len(self.msg_nodes)) > MAX_MESSAGE_NODES:
+                logger.info(f"Message node cache size ({num_nodes}) exceeds limit ({MAX_MESSAGE_NODES}), pruning oldest")
                 for msg_id in sorted(self.msg_nodes.keys())[: num_nodes - MAX_MESSAGE_NODES]:
                     async with self.msg_nodes.setdefault(msg_id, MsgNode()).lock:
                         self.msg_nodes.pop(msg_id, None)
@@ -344,6 +370,7 @@ class BotClient(discord.Client):
             # Start background task to fetch images if serper queries exist
             user_msg_node = self.msg_nodes.get(new_msg.id)
             if user_msg_node and user_msg_node.serper_queries:
+                logger.info(f"Starting background task to fetch images for message {new_msg.id}")
                 asyncio.create_task(
                     fetch_images_and_update_views(
                         user_msg_node.serper_queries,
@@ -356,7 +383,7 @@ class BotClient(discord.Client):
                 )
                 
         except Exception as e:
-            logger.exception("Error in on_message handler")
+            logger.exception(f"Error in on_message handler for message {new_msg.id}: {str(e)}")
             await progress_message.edit(
                 content=f"An error occurred while processing your request: {str(e)}",
                 allowed_mentions=allowed_mentions

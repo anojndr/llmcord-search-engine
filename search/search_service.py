@@ -104,6 +104,7 @@ class SearchService:
 
             data: Dict[str, Any] = response.json()
             if not data.get('results'):
+                logger.warning(f"No results found from SearxNG for query: {query}")
                 return None, "No results found from SearxNG"
 
             results: List[SearchResult] = []
@@ -114,10 +115,11 @@ class SearchService:
                     snippet=result.get('content', 'No snippet')
                 ))
 
+            logger.info(f"SearxNG search returned {len(results)} results for query: {query}")
             return results, None
 
         except Exception as e:
-            logger.error(f"SearxNG search error: {str(e)}")
+            logger.error(f"SearxNG search error for query '{query}': {str(e)}", exc_info=True)
             return None, f"SearxNG error: {str(e)}"
 
     async def search_with_serper(
@@ -138,6 +140,7 @@ class SearchService:
         try:
             api_key: Optional[str] = await self.api_key_manager.get_next_api_key('serper')
             if not api_key:
+                logger.warning(f"No Serper API key available for query: {query}")
                 return None, "No Serper API key available"
 
             params: Dict[str, Any] = {
@@ -147,6 +150,7 @@ class SearchService:
                 'apiKey': api_key
             }
 
+            logger.info(f"Making Serper API request for query: {query}")
             response: httpx.Response = await self.httpx_client.get(
                 'https://google.serper.dev/search',
                 params=params
@@ -164,10 +168,11 @@ class SearchService:
                         snippet=result.get('snippet', 'No snippet')
                     ))
 
+            logger.info(f"Serper API search returned {len(results)} results for query: {query}")
             return results, None
 
         except Exception as e:
-            logger.error(f"Serper API error: {str(e)}")
+            logger.error(f"Serper API error for query '{query}': {str(e)}", exc_info=True)
             return None, f"Serper API error: {str(e)}"
 
     async def search_with_bing(
@@ -190,6 +195,7 @@ class SearchService:
             endpoint: Optional[str] = os.getenv('BING_SEARCH_V7_ENDPOINT')
 
             if not subscription_key or not endpoint:
+                logger.warning(f"Bing API credentials missing from environment variables for query: {query}")
                 return None, "Bing API credentials missing from environment variables"
 
             headers: Dict[str, str] = {'Ocp-Apim-Subscription-Key': subscription_key}
@@ -200,6 +206,7 @@ class SearchService:
                 'responseFilter': 'Webpages'
             }
 
+            logger.info(f"Making Bing API request for query: {query}")
             response: httpx.Response = await self.httpx_client.get(
                 f"{endpoint.rstrip('/')}/v7.0/search",
                 headers=headers,
@@ -218,10 +225,11 @@ class SearchService:
                         snippet=page.get('snippet', 'No snippet')
                     ))
 
+            logger.info(f"Bing API search returned {len(results)} results for query: {query}")
             return results, None
 
         except Exception as e:
-            logger.error(f"Bing API error: {str(e)}")
+            logger.error(f"Bing API error for query '{query}': {str(e)}", exc_info=True)
             return None, f"Bing API error: {str(e)}"
 
     async def search(
@@ -268,4 +276,5 @@ class SearchService:
         if error:
             errors.append(error)
 
+        logger.warning(f"All search providers failed for query: {query}")
         return [], errors
