@@ -6,6 +6,7 @@ This module defines constants used throughout the application.
 
 import logging
 from typing import Tuple
+
 import discord
 
 logger = logging.getLogger(__name__)
@@ -24,11 +25,19 @@ VISION_MODEL_TAGS: Tuple[str, ...] = (
 logger.debug(f"Vision model tags defined: {VISION_MODEL_TAGS}")
 
 # Providers that support usernames in messages
-PROVIDERS_SUPPORTING_USERNAMES: Tuple[str, ...] = ("openai", "x-ai")
+PROVIDERS_SUPPORTING_USERNAMES: Tuple[str, ...] = (
+    "openai", 
+    "x-ai"
+)
 logger.debug(f"Providers supporting usernames defined: {PROVIDERS_SUPPORTING_USERNAMES}")
 
 # Allowed file types for attachments
-ALLOWED_FILE_TYPES: Tuple[str, ...] = ("image", "text", "application", "audio")
+ALLOWED_FILE_TYPES: Tuple[str, ...] = (
+    "image", 
+    "text", 
+    "application", 
+    "audio"
+)
 logger.debug(f"Allowed file types defined: {ALLOWED_FILE_TYPES}")
 
 # Discord embed colors

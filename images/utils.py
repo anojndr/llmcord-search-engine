@@ -5,13 +5,15 @@ Provides helper functions for image URL normalization and downloading.
 """
 
 import logging
-from typing import Optional
-import httpx
-from urllib.parse import urljoin, urlparse
 import base64
+from typing import Optional
+from urllib.parse import urljoin, urlparse
+
+import httpx
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
 
 def normalize_image_url(image_url: str, base_url: Optional[str] = None) -> Optional[str]:
     """
@@ -38,28 +40,37 @@ def normalize_image_url(image_url: str, base_url: Optional[str] = None) -> Optio
 
         parsed = urlparse(image_url)
 
+        # Handle protocol-relative URLs (starting with //)
         if not parsed.scheme:
             if image_url.startswith('//'):
                 normalized_url = f'https:{image_url}'
                 logger.debug(f"Protocol-relative URL normalized: {normalized_url}")
                 return normalized_url
 
+            # Handle absolute paths (starting with /)
             if image_url.startswith('/'):
                 if base_url:
                     normalized_url = urljoin(base_url, image_url)
-                    logger.debug(f"Absolute path URL normalized with base {base_url}: {normalized_url}")
+                    logger.debug(
+                        f"Absolute path URL normalized with base {base_url}: "
+                        f"{normalized_url}"
+                    )
                     return normalized_url
                 logger.warning(f"Absolute path URL without base URL: {image_url}")
                 return None
 
+            # Handle relative URLs
             if base_url:
                 normalized_url = urljoin(base_url, image_url)
-                logger.debug(f"Relative URL normalized with base {base_url}: {normalized_url}")
+                logger.debug(
+                    f"Relative URL normalized with base {base_url}: {normalized_url}"
+                )
                 return normalized_url
                 
             logger.warning(f"Relative URL without base URL: {image_url}")
             return None
 
+        # Check for supported schemes
         if parsed.scheme not in ('http', 'https'):
             logger.warning(f"Unsupported URL scheme: {parsed.scheme}")
             return None
@@ -70,6 +81,7 @@ def normalize_image_url(image_url: str, base_url: Optional[str] = None) -> Optio
     except Exception as e:
         logger.error(f"Error normalizing URL {image_url}: {e}", exc_info=True)
         return None
+
 
 async def download_image(
     image_url: str,
@@ -88,6 +100,7 @@ async def download_image(
         Downloaded image data, or None if download fails.
     """
     try:
+        # Normalize the URL
         normalized_url: Optional[str] = normalize_image_url(image_url, base_url)
         if not normalized_url:
             logger.warning(f"Unable to normalize image URL: {image_url}")
@@ -111,7 +124,9 @@ async def download_image(
         # Validate content type
         content_type: str = response.headers.get('content-type', '').lower()
         if not any(img_type in content_type for img_type in ['image/', 'application/octet-stream']):
-            logger.warning(f"Invalid content type: {content_type} for URL: {normalized_url}")
+            logger.warning(
+                f"Invalid content type: {content_type} for URL: {normalized_url}"
+            )
             raise ValueError(f"Invalid content type: {content_type}")
 
         logger.debug(f"Successfully downloaded image ({len(response.content)} bytes)")

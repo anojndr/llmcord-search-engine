@@ -6,8 +6,8 @@ and to split queries accordingly. It uses an LLM call to generate a JSON array
 of query strings.
 """
 
-import logging
 import json
+import logging
 import re
 from typing import List, Dict, Any
 from litellm import acompletion
@@ -16,6 +16,7 @@ from config.api_key_manager import APIKeyManager
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
 
 async def split_query(
     query: str,
@@ -39,7 +40,8 @@ async def split_query(
     """
     logger.info(f"Processing query for potential splitting: '{query}'")
     
-    query_splitter_prompt: str = '''Your task is to determine if the query implies a comparison between multiple entities.
+    # Define the prompt template
+    query_splitter_prompt = '''Your task is to determine if the query implies a comparison between multiple entities.
 
 If it does, decompose it into separate queries focusing on each entity, along with the original comparison query.
 
@@ -75,24 +77,29 @@ Input: "{query}"
 Output:
 '''
 
-    formatted_prompt: str = query_splitter_prompt.format(query=query)
+    # Format the prompt with the current query
+    formatted_prompt = query_splitter_prompt.format(query=query)
 
-    query_splitter_provider: str = cfg.get('query_splitter_provider', 'openai')
-    query_splitter_model: str = cfg.get('query_splitter_model', 'gpt-4')
+    # Get provider and model settings
+    query_splitter_provider = cfg.get('query_splitter_provider', 'openai')
+    query_splitter_model = cfg.get('query_splitter_model', 'gpt-4')
     
     # Get API key
-    api_key: str = await api_key_manager.get_next_api_key(query_splitter_provider)
+    api_key = await api_key_manager.get_next_api_key(query_splitter_provider)
     if not api_key:
-        logger.warning(f"No API key available for query splitter provider: {query_splitter_provider}, using placeholder")
+        logger.warning(
+            f"No API key available for query splitter provider: "
+            f"{query_splitter_provider}, using placeholder"
+        )
         api_key = 'sk-no-key-required'
 
     # Prepare LLM request
-    messages: List[Dict[str, str]] = [
+    messages = [
         {"role": "system", "content": "You are a concise assistant."},
         {"role": "user", "content": formatted_prompt}
     ]
 
-    kwargs: Dict[str, Any] = {
+    kwargs = {
         "model": query_splitter_model,
         "messages": messages,
         "stream": False,
@@ -126,55 +133,90 @@ Output:
             }
         ]
 
-    # Log request (redacted for sensitive info)
-    logging_kwargs: Dict[str, Any] = json.loads(json.dumps(kwargs, default=str))
+    # Log request with redacted API key
+    logging_kwargs = kwargs.copy()
     if 'api_key' in logging_kwargs:
         api_key_str = logging_kwargs['api_key']
         if isinstance(api_key_str, str) and len(api_key_str) > 8:
             logging_kwargs['api_key'] = api_key_str[:4] + '...' + api_key_str[-4:]
     
-    logger.debug(f"Query splitter request: provider={query_splitter_provider}, model={query_splitter_model}")
+    logger.debug(
+        f"Query splitter request: provider={query_splitter_provider}, "
+        f"model={query_splitter_model}"
+    )
 
     # Call the model with retries
-    max_retries: int = 5
-    response: Any = None
+    max_retries = 5
+    response = None
     
     for i in range(max_retries):
         try:
-            logger.info(f"Query splitter attempt {i+1}/{max_retries} using provider: {query_splitter_provider}")
+            logger.info(
+                f"Query splitter attempt {i+1}/{max_retries} using provider: "
+                f"{query_splitter_provider}"
+            )
             response = await acompletion(**kwargs)
             break
         except Exception as e:
             error_type = type(e).__name__
-            if "rate limit" in str(e).lower() or "too many requests" in str(e).lower():
-                logger.warning(f"Rate limit exceeded for query splitter (attempt {i+1}/{max_retries}): {str(e)}")
+            error_msg = str(e).lower()
+            
+            if "rate limit" in error_msg or "too many requests" in error_msg:
+                logger.warning(
+                    f"Rate limit exceeded for query splitter "
+                    f"(attempt {i+1}/{max_retries}): {str(e)}"
+                )
             else:
-                logger.error(f"Error calling query splitter model (attempt {i+1}/{max_retries}): {error_type}: {str(e)}", 
-                             exc_info=True)
+                logger.error(
+                    f"Error calling query splitter model "
+                    f"(attempt {i+1}/{max_retries}): {error_type}: {str(e)}", 
+                    exc_info=True
+                )
             
             # Get a new API key for next attempt
-            new_api_key = await api_key_manager.get_next_api_key(query_splitter_provider)
+            new_api_key = await api_key_manager.get_next_api_key(
+                query_splitter_provider
+            )
             if new_api_key:
                 kwargs["api_key"] = new_api_key
-                logger.info(f"Retrying with new API key for {query_splitter_provider}")
+                logger.info(
+                    f"Retrying with new API key for {query_splitter_provider}"
+                )
             
             # On last attempt, return original query
             if i == max_retries - 1:
-                logger.warning(f"All query splitter attempts failed, returning original query")
+                logger.warning(
+                    f"All query splitter attempts failed, returning original query"
+                )
                 return [query]
 
+    # Handle case where we got no response
     if response is None:
         logger.warning("No response from query splitter, returning original query")
         return [query]
 
     # Process the response
-    content: str = response.choices[0].message.content.strip()
+    content = response.choices[0].message.content.strip()
+    return _parse_query_splitter_response(content, query)
+
+
+def _parse_query_splitter_response(content: str, original_query: str) -> List[str]:
+    """
+    Parse the response from the query splitter.
+    
+    Args:
+        content: Response content from the LLM
+        original_query: Original query (used as fallback)
+        
+    Returns:
+        List of queries
+    """
     try:
         # Try to extract JSON array from response
         match = re.search(r'\[.*\]', content, re.DOTALL)
         if match:
-            json_content: str = match.group(0)
-            queries: List[str] = json.loads(json_content)
+            json_content = match.group(0)
+            queries = json.loads(json_content)
             
             if isinstance(queries, list) and all(isinstance(q, str) for q in queries):
                 logger.info(f"Query successfully split into {len(queries)} queries")
@@ -182,20 +224,42 @@ Output:
                     logger.debug(f"Query {i+1}: {q}")
                 return queries
             else:
-                logger.warning(f"Invalid JSON array format in query_splitter response: {json_content}")
-                return [query]
+                logger.warning(
+                    f"Invalid JSON array format in query_splitter response: "
+                    f"{json_content}"
+                )
+                return [original_query]
         else:
-            logger.warning(f"No JSON array found in query_splitter response: {content}")
-            return [query]
+            logger.warning(
+                f"No JSON array found in query_splitter response: {content}"
+            )
+            return [original_query]
     except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse JSON in query_splitter response: {e}, content: {content}", exc_info=True)
-        return [query]
+        logger.error(
+            f"Failed to parse JSON in query_splitter response: {e}, "
+            f"content: {content}", 
+            exc_info=True
+        )
+        return [original_query]
     except Exception as e:
-        logger.error(f"Unexpected error processing query_splitter response: {e}", exc_info=True)
-        return [query]
+        logger.error(
+            f"Unexpected error processing query_splitter response: {e}", 
+            exc_info=True
+        )
+        return [original_query]
+
 
 def truncate_base64(base64_string: str, max_length: int = 50) -> str:
-    """Utility function to truncate long base64 strings for logging purposes."""
+    """
+    Utility function to truncate long base64 strings for logging purposes.
+    
+    Args:
+        base64_string: Base64 encoded string to truncate
+        max_length: Maximum length to show before truncating
+        
+    Returns:
+        Truncated string with ellipsis
+    """
     if not base64_string:
         return ""
     if len(base64_string) > max_length:

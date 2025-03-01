@@ -5,17 +5,20 @@ Implements web search functionality using SearxNG as the main provider, with fal
 Defines a SearchResult data class to represent individual search hits.
 """
 
-import os
 import logging
-from typing import Any, Dict, Optional, List, Tuple
-import httpx
+import os
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urljoin, quote
+
+import httpx
 
 from config.api_key_manager import APIKeyManager
 from config.searxng_config import get_searxng_config
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 
 @dataclass
 class SearchResult:
@@ -31,6 +34,7 @@ class SearchResult:
     title: str
     snippet: str
 
+
 class SearchService:
     """
     Service class for handling search queries.
@@ -38,11 +42,12 @@ class SearchService:
     This service attempts to perform a search with SearxNG first, then falls back
     to Serper API and finally Bing API if needed.
     """
-    api_key_manager: APIKeyManager
-    httpx_client: httpx.AsyncClient
-    searxng_config: Dict[str, Any]
-
-    def __init__(self, api_key_manager: APIKeyManager, httpx_client: httpx.AsyncClient) -> None:
+    
+    def __init__(
+        self, 
+        api_key_manager: APIKeyManager, 
+        httpx_client: httpx.AsyncClient
+    ) -> None:
         """
         Initialize SearchService with an API key manager and HTTP client.
 
@@ -74,9 +79,11 @@ class SearchService:
               - Or an error message if something went wrong.
         """
         try:
-            language: str = self.searxng_config['language'].split('#')[0].strip()
-            categories: str = self.searxng_config['categories'].split('#')[0].strip()
+            # Parse configuration
+            language = self.searxng_config['language'].split('#')[0].strip()
+            categories = self.searxng_config['categories'].split('#')[0].strip()
 
+            # Prepare parameters
             params: Dict[str, Any] = {
                 'q': query,
                 'format': 'json',
@@ -86,28 +93,32 @@ class SearchService:
                 'categories': categories
             }
 
-            base_url: str = urljoin(self.searxng_config['base_url'], 'search')
-            param_strings: List[str] = []
+            # Build URL with properly encoded parameters
+            base_url = urljoin(self.searxng_config['base_url'], 'search')
+            param_strings = []
             for key, value in params.items():
-                encoded_key: str = quote(str(key))
-                encoded_value: str = quote(str(value))
+                encoded_key = quote(str(key))
+                encoded_value = quote(str(value))
                 param_strings.append(f"{encoded_key}={encoded_value}")
-            url: str = f"{base_url}?{'&'.join(param_strings)}"
+            url = f"{base_url}?{'&'.join(param_strings)}"
 
             logger.info(f"Making SearxNG request to: {url}")
 
-            response: httpx.Response = await self.httpx_client.get(
+            # Send request
+            response = await self.httpx_client.get(
                 url,
                 timeout=self.searxng_config['timeout']
             )
             response.raise_for_status()
 
-            data: Dict[str, Any] = response.json()
+            # Process response
+            data = response.json()
             if not data.get('results'):
                 logger.warning(f"No results found from SearxNG for query: {query}")
                 return None, "No results found from SearxNG"
 
-            results: List[SearchResult] = []
+            # Convert results to SearchResult objects
+            results = []
             for result in data['results'][:max_urls]:
                 results.append(SearchResult(
                     url=result['url'],
@@ -115,11 +126,16 @@ class SearchService:
                     snippet=result.get('content', 'No snippet')
                 ))
 
-            logger.info(f"SearxNG search returned {len(results)} results for query: {query}")
+            logger.info(
+                f"SearxNG search returned {len(results)} results for query: {query}"
+            )
             return results, None
 
         except Exception as e:
-            logger.error(f"SearxNG search error for query '{query}': {str(e)}", exc_info=True)
+            logger.error(
+                f"SearxNG search error for query '{query}': {str(e)}", 
+                exc_info=True
+            )
             return None, f"SearxNG error: {str(e)}"
 
     async def search_with_serper(
@@ -138,11 +154,13 @@ class SearchService:
             Tuple containing the list of SearchResult or an error message.
         """
         try:
-            api_key: Optional[str] = await self.api_key_manager.get_next_api_key('serper')
+            # Get API key
+            api_key = await self.api_key_manager.get_next_api_key('serper')
             if not api_key:
                 logger.warning(f"No Serper API key available for query: {query}")
                 return None, "No Serper API key available"
 
+            # Prepare request
             params: Dict[str, Any] = {
                 'q': query,
                 'num': max_urls,
@@ -150,15 +168,17 @@ class SearchService:
                 'apiKey': api_key
             }
 
+            # Send request
             logger.info(f"Making Serper API request for query: {query}")
-            response: httpx.Response = await self.httpx_client.get(
+            response = await self.httpx_client.get(
                 'https://google.serper.dev/search',
                 params=params
             )
             response.raise_for_status()
 
-            data: Dict[str, Any] = response.json()
-            results: List[SearchResult] = []
+            # Process response
+            data = response.json()
+            results = []
 
             for result in data.get('organic', [])[:max_urls]:
                 if 'link' in result:
@@ -168,11 +188,16 @@ class SearchService:
                         snippet=result.get('snippet', 'No snippet')
                     ))
 
-            logger.info(f"Serper API search returned {len(results)} results for query: {query}")
+            logger.info(
+                f"Serper API search returned {len(results)} results for query: {query}"
+            )
             return results, None
 
         except Exception as e:
-            logger.error(f"Serper API error for query '{query}': {str(e)}", exc_info=True)
+            logger.error(
+                f"Serper API error for query '{query}': {str(e)}", 
+                exc_info=True
+            )
             return None, f"Serper API error: {str(e)}"
 
     async def search_with_bing(
@@ -191,31 +216,38 @@ class SearchService:
             Tuple containing a list of SearchResult objects or an error message.
         """
         try:
-            subscription_key: Optional[str] = os.getenv('BING_SEARCH_V7_SUBSCRIPTION_KEY')
-            endpoint: Optional[str] = os.getenv('BING_SEARCH_V7_ENDPOINT')
+            # Get API credentials
+            subscription_key = os.getenv('BING_SEARCH_V7_SUBSCRIPTION_KEY')
+            endpoint = os.getenv('BING_SEARCH_V7_ENDPOINT')
 
             if not subscription_key or not endpoint:
-                logger.warning(f"Bing API credentials missing from environment variables for query: {query}")
+                logger.warning(
+                    f"Bing API credentials missing from environment variables "
+                    f"for query: {query}"
+                )
                 return None, "Bing API credentials missing from environment variables"
 
-            headers: Dict[str, str] = {'Ocp-Apim-Subscription-Key': subscription_key}
-            params: Dict[str, Any] = {
+            # Prepare request
+            headers = {'Ocp-Apim-Subscription-Key': subscription_key}
+            params = {
                 'q': query,
                 'mkt': 'en-US',
                 'count': max_urls,
                 'responseFilter': 'Webpages'
             }
 
+            # Send request
             logger.info(f"Making Bing API request for query: {query}")
-            response: httpx.Response = await self.httpx_client.get(
+            response = await self.httpx_client.get(
                 f"{endpoint.rstrip('/')}/v7.0/search",
                 headers=headers,
                 params=params
             )
             response.raise_for_status()
 
-            data: Dict[str, Any] = response.json()
-            results: List[SearchResult] = []
+            # Process response
+            data = response.json()
+            results = []
 
             for page in data.get('webPages', {}).get('value', [])[:max_urls]:
                 if 'url' in page:
@@ -225,11 +257,16 @@ class SearchService:
                         snippet=page.get('snippet', 'No snippet')
                     ))
 
-            logger.info(f"Bing API search returned {len(results)} results for query: {query}")
+            logger.info(
+                f"Bing API search returned {len(results)} results for query: {query}"
+            )
             return results, None
 
         except Exception as e:
-            logger.error(f"Bing API error for query '{query}': {str(e)}", exc_info=True)
+            logger.error(
+                f"Bing API error for query '{query}': {str(e)}", 
+                exc_info=True
+            )
             return None, f"Bing API error: {str(e)}"
 
     async def search(
@@ -256,20 +293,21 @@ class SearchService:
         """
         errors: List[str] = []
 
-        results: Optional[List[SearchResult]]
-        error: Optional[str]
+        # Try SearxNG first
         results, error = await self.search_with_searxng(query, max_urls)
         if results:
             return results, errors
         if error:
             errors.append(error)
 
+        # Try Serper as first fallback
         results, error = await self.search_with_serper(query, max_urls)
         if results:
             return results, errors
         if error:
             errors.append(error)
 
+        # Try Bing as final fallback
         results, error = await self.search_with_bing(query, max_urls)
         if results:
             return results, errors

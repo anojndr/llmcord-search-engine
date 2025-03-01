@@ -8,22 +8,23 @@ handling streaming, edits, and content chunking.
 import asyncio
 import logging
 from datetime import datetime as dt
-from typing import Dict, Any, List, Optional, Set, Tuple
+from typing import Dict, Any, List, Optional, Set, Tuple, AsyncGenerator
 
 import discord
 from discord import Message, AllowedMentions
 
-from core.message_node import MsgNode
-from core.discord_ui import OutputView
 from core.constants import (
-    STREAMING_INDICATOR, 
-    EDIT_DELAY_SECONDS, 
-    EMBED_COLOR_COMPLETE, 
+    STREAMING_INDICATOR,
+    EDIT_DELAY_SECONDS,
+    EMBED_COLOR_COMPLETE,
     EMBED_COLOR_INCOMPLETE
 )
+from core.discord_ui import OutputView
+from core.message_node import MsgNode
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
 
 class ResponseHandler:
     """
@@ -56,11 +57,14 @@ class ResponseHandler:
             The created response message
         """
         try:
-            logger.info(f"Creating initial response message by editing progress message {progress_message.id}")
-            response_msg: Message = await progress_message.edit(
-                content=None, 
-                embed=embed, 
-                view=view, 
+            logger.info(
+                f"Creating initial response message by editing progress "
+                f"message {progress_message.id}"
+            )
+            response_msg = await progress_message.edit(
+                content=None,
+                embed=embed,
+                view=view,
                 allowed_mentions=allowed_mentions
             )
             
@@ -99,11 +103,14 @@ class ResponseHandler:
             The created continuation message
         """
         try:
-            logger.info(f"Creating continuation message as reply to message {prev_msg.id}")
-            response_msg: Message = await prev_msg.reply(
-                embed=embed, 
-                view=view, 
-                mention_author=False, 
+            logger.info(
+                f"Creating continuation message as reply to message "
+                f"{prev_msg.id}"
+            )
+            response_msg = await prev_msg.reply(
+                embed=embed,
+                view=view,
+                mention_author=False,
                 allowed_mentions=allowed_mentions
             )
             
@@ -115,15 +122,18 @@ class ResponseHandler:
             
             return response_msg
         except Exception as e:
-            logger.error(f"Error creating continuation message: {e}", exc_info=True)
+            logger.error(
+                f"Error creating continuation message: {e}", 
+                exc_info=True
+            )
             raise
     
     @staticmethod
     def prepare_embed(
-        content: str, 
-        user_warnings: Set[str], 
-        is_complete: bool, 
-        model_name: str, 
+        content: str,
+        user_warnings: Set[str],
+        is_complete: bool,
+        model_name: str,
         internet_used: bool,
         searched_for_text: str = ""
     ) -> discord.Embed:
@@ -141,13 +151,16 @@ class ResponseHandler:
         Returns:
             The prepared Discord embed
         """
-        embed_description: str = searched_for_text + content
+        embed_description = searched_for_text + content
         if not is_complete:
             embed_description += STREAMING_INDICATOR
             
-        embed: discord.Embed = discord.Embed(
+        embed = discord.Embed(
             description=embed_description,
-            color=EMBED_COLOR_COMPLETE if is_complete else EMBED_COLOR_INCOMPLETE,
+            color=(
+                EMBED_COLOR_COMPLETE if is_complete 
+                else EMBED_COLOR_INCOMPLETE
+            ),
         )
         
         # Add warnings as fields
@@ -155,7 +168,7 @@ class ResponseHandler:
             embed.add_field(name=warning, value="", inline=False)
             
         # Add footer
-        footer_text: str = f"Model: {model_name} | " + (
+        footer_text = f"Model: {model_name} | " + (
             "Internet used" if internet_used else "Internet NOT used"
         )
         embed.set_footer(text=footer_text)
@@ -164,7 +177,7 @@ class ResponseHandler:
     
     @staticmethod
     async def handle_streaming_response(
-        stream: Any,
+        stream: AsyncGenerator[Any, None],
         progress_message: Message,
         user_message_content: str,
         user_message_id: int,
@@ -198,7 +211,9 @@ class ResponseHandler:
             List of response messages
         """
         try:
-            logger.info(f"Handling streaming response for message {user_message_id}")
+            logger.info(
+                f"Handling streaming response for message {user_message_id}"
+            )
             response_msgs: List[Message] = []
             response_contents: List[str] = []
             prev_chunk: Any = None
@@ -207,26 +222,33 @@ class ResponseHandler:
             searched_for_text_added: bool = False
             
             async for curr_chunk in stream:
-                prev_content: str = (prev_chunk.choices[0].delta.content
-                                   if (prev_chunk is not None and prev_chunk.choices[0].delta.content)
-                                   else "")
-                curr_content: str = curr_chunk.choices[0].delta.content or ""
+                prev_content = (
+                    prev_chunk.choices[0].delta.content
+                    if (prev_chunk is not None and 
+                        prev_chunk.choices[0].delta.content)
+                    else ""
+                )
+                curr_content = curr_chunk.choices[0].delta.content or ""
                 
                 # Process content if we have something to work with
                 if response_contents or prev_content:
                     # Check if we need to start a new message
-                    if response_contents == [] or len(response_contents[-1] + prev_content) > max_message_length:
+                    if (response_contents == [] or 
+                            len(response_contents[-1] + prev_content) > max_message_length):
                         response_contents.append("")
                         
                         # Prepare searched_for text for first message only
-                        embed_description: str = ""
+                        embed_description = ""
                         if not searched_for_text_added and searched_for_text:
                             embed_description = searched_for_text
                             searched_for_text_added = True
                         
-                        embed_description += response_contents[-1] + prev_content + STREAMING_INDICATOR
+                        embed_description += (
+                            response_contents[-1] + prev_content + 
+                            STREAMING_INDICATOR
+                        )
                         
-                        embed: discord.Embed = discord.Embed(
+                        embed = discord.Embed(
                             description=embed_description,
                             color=EMBED_COLOR_INCOMPLETE,
                         )
@@ -234,43 +256,57 @@ class ResponseHandler:
                         for warning in sorted(user_warnings):
                             embed.add_field(name=warning, value="", inline=False)
                         
-                        footer_text: str = f"Model: {config['model']} | " + (
-                            "Internet used" if msg_nodes[user_message_id].internet_used else "Internet NOT used"
+                        footer_text = f"Model: {config['model']} | " + (
+                            "Internet used" 
+                            if msg_nodes[user_message_id].internet_used 
+                            else "Internet NOT used"
                         )
                         embed.set_footer(text=footer_text)
                         
-                        view: OutputView = OutputView(response_contents, user_message_content, serper_queries)
+                        view = OutputView(
+                            response_contents, user_message_content, serper_queries
+                        )
                         
                         if not response_msgs:
                             # First message - edit the progress message
-                            response_msg: Message = await ResponseHandler.create_response_message(
-                                progress_message, embed, view, allowed_mentions, msg_nodes, new_msg
+                            response_msg = await ResponseHandler.create_response_message(
+                                progress_message, embed, view, allowed_mentions, 
+                                msg_nodes, new_msg
                             )
                             response_msgs.append(response_msg)
                             last_task_time = dt.now().timestamp()
-                            logger.info(f"Created initial response message {response_msg.id}")
+                            logger.info(
+                                f"Created initial response message {response_msg.id}"
+                            )
                         else:
                             # Continuation message
-                            response_msg: Message = await ResponseHandler.create_continuation_message(
-                                response_msgs[-1], embed, view, allowed_mentions, msg_nodes, new_msg
+                            response_msg = await ResponseHandler.create_continuation_message(
+                                response_msgs[-1], embed, view, allowed_mentions, 
+                                msg_nodes, new_msg
                             )
                             response_msgs.append(response_msg)
                             last_task_time = dt.now().timestamp()
-                            logger.info(f"Created continuation message {response_msg.id}")
+                            logger.info(
+                                f"Created continuation message {response_msg.id}"
+                            )
                     
                     # Add content to current message
                     response_contents[-1] += prev_content
                     
                     # Check if we need to update the message
-                    finish_reason: Optional[str] = curr_chunk.choices[0].finish_reason
-                    ready_to_edit: bool = (
+                    finish_reason = curr_chunk.choices[0].finish_reason
+                    ready_to_edit = (
                         (edit_task is None or edit_task.done())
                         and dt.now().timestamp() - last_task_time >= EDIT_DELAY_SECONDS
                     )
-                    msg_split_incoming: bool = len(response_contents[-1] + curr_content) > max_message_length
-                    is_final_edit: bool = finish_reason is not None or msg_split_incoming
-                    is_good_finish: bool = finish_reason is not None and any(
-                        finish_reason.lower() == x for x in ("stop", "end_turn")
+                    msg_split_incoming = (
+                        len(response_contents[-1] + curr_content) > max_message_length
+                    )
+                    is_final_edit = finish_reason is not None or msg_split_incoming
+                    is_good_finish = (
+                        finish_reason is not None and any(
+                            finish_reason.lower() == x for x in ("stop", "end_turn")
+                        )
                     )
                     
                     if ready_to_edit or is_final_edit:
@@ -278,8 +314,9 @@ class ResponseHandler:
                             await edit_task
                         
                         # Prepare embed description with searched_for_text for first message
-                        embed_description: str = ""
-                        if searched_for_text and response_msgs.index(response_msgs[-1]) == 0:
+                        embed_description = ""
+                        if (searched_for_text and 
+                                response_msgs.index(response_msgs[-1]) == 0):
                             embed_description = searched_for_text
                         
                         # Add the content
@@ -303,19 +340,28 @@ class ResponseHandler:
                         for warning in sorted(user_warnings):
                             embed.add_field(name=warning, value="", inline=False)
                         
-                        footer_text: str = f"Model: {config['model']} | " + (
-                            "Internet used" if msg_nodes[user_message_id].internet_used else "Internet NOT used"
+                        footer_text = f"Model: {config['model']} | " + (
+                            "Internet used" 
+                            if msg_nodes[user_message_id].internet_used 
+                            else "Internet NOT used"
                         )
                         embed.set_footer(text=footer_text)
                         
                         # Edit the message
                         try:
                             edit_task = asyncio.create_task(
-                                response_msgs[-1].edit(embed=embed, view=view, allowed_mentions=allowed_mentions)
+                                response_msgs[-1].edit(
+                                    embed=embed, 
+                                    view=view, 
+                                    allowed_mentions=allowed_mentions
+                                )
                             )
                             last_task_time = dt.now().timestamp()
                         except Exception as e:
-                            logger.error(f"Error editing message {response_msgs[-1].id}: {e}", exc_info=True)
+                            logger.error(
+                                f"Error editing message {response_msgs[-1].id}: {e}", 
+                                exc_info=True
+                            )
                 
                 # Save current chunk for next iteration
                 prev_chunk = curr_chunk
@@ -325,11 +371,17 @@ class ResponseHandler:
                 msg_nodes[response_msg.id].text = "".join(response_contents)
                 msg_nodes[response_msg.id].lock.release()
             
-            logger.info(f"Completed streaming response, created {len(response_msgs)} message(s)")
+            logger.info(
+                f"Completed streaming response, created {len(response_msgs)} "
+                f"message(s)"
+            )
             return response_msgs
             
         except Exception as e:
-            logger.error(f"Error handling streaming response: {e}", exc_info=True)
+            logger.error(
+                f"Error handling streaming response: {e}", 
+                exc_info=True
+            )
             raise
     
     @staticmethod
@@ -360,16 +412,21 @@ class ResponseHandler:
         try:
             logger.info(f"Handling plain text response for message {new_msg.id}")
             response_msgs: List[Message] = []
-            view: OutputView = OutputView(response_contents, user_message_content, serper_queries)
+            view = OutputView(
+                response_contents, user_message_content, serper_queries
+            )
             
             for i, content in enumerate(response_contents):
                 if not response_msgs:
                     # First message - edit the progress message
-                    logger.info(f"Creating initial plain text response by editing progress message {progress_message.id}")
-                    response_msg: Message = await progress_message.edit(
-                        content=content, 
-                        view=view, 
-                        suppress_embeds=True, 
+                    logger.info(
+                        f"Creating initial plain text response by editing "
+                        f"progress message {progress_message.id}"
+                    )
+                    response_msg = await progress_message.edit(
+                        content=content,
+                        view=view,
+                        suppress_embeds=True,
                         allowed_mentions=allowed_mentions
                     )
                     msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
@@ -377,12 +434,15 @@ class ResponseHandler:
                     response_msgs.append(response_msg)
                 else:
                     # Continuation message
-                    logger.info(f"Creating plain text continuation message as reply to message {response_msgs[-1].id}")
-                    response_msg: Message = await response_msgs[-1].reply(
-                        content=content, 
-                        view=view, 
-                        suppress_embeds=True, 
-                        mention_author=False, 
+                    logger.info(
+                        f"Creating plain text continuation message as reply "
+                        f"to message {response_msgs[-1].id}"
+                    )
+                    response_msg = await response_msgs[-1].reply(
+                        content=content,
+                        view=view,
+                        suppress_embeds=True,
+                        mention_author=False,
                         allowed_mentions=allowed_mentions
                     )
                     msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
@@ -394,9 +454,15 @@ class ResponseHandler:
                 msg_nodes[response_msg.id].text = "".join(response_contents)
                 msg_nodes[response_msg.id].lock.release()
             
-            logger.info(f"Completed plain text response, created {len(response_msgs)} message(s)")
+            logger.info(
+                f"Completed plain text response, created {len(response_msgs)} "
+                f"message(s)"
+            )
             return response_msgs
             
         except Exception as e:
-            logger.error(f"Error handling plain text response: {e}", exc_info=True)
+            logger.error(
+                f"Error handling plain text response: {e}", 
+                exc_info=True
+            )
             raise

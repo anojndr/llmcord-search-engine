@@ -5,16 +5,17 @@ This module handles image generation using the LiteLLM-compatible API.
 It provides a function to generate images based on text prompts.
 """
 
+import asyncio
 import logging
 import os
 from typing import Dict, Any, Optional, Tuple
-import asyncio
 
 import httpx
 from litellm import image_generation
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
 
 async def generate_image(
     prompt: str,
@@ -40,7 +41,10 @@ async def generate_image(
         - Raw response or None
     """
     try:
-        logger.info(f"Generating image with prompt: '{prompt}', model: {model}, size: {size}")
+        logger.info(
+            f"Generating image with prompt: '{prompt}', model: {model}, "
+            f"size: {size}"
+        )
         
         # Use provided API key or get from environment
         if not api_key:
@@ -76,5 +80,8 @@ async def generate_image(
         
     except Exception as e:
         error_type = type(e).__name__
-        logger.error(f"Error generating image: {error_type}: {str(e)}", exc_info=True)
+        logger.error(
+            f"Error generating image: {error_type}: {str(e)}", 
+            exc_info=True
+        )
         return False, f"Error generating image: {str(e)}", None

@@ -7,14 +7,16 @@ This module handles communication with language model APIs, including:
 - Error handling and retries
 """
 
+import asyncio
 import json
 import logging
-import asyncio
 from typing import Dict, Any, List, Optional, AsyncGenerator, Tuple
+
 from litellm import acompletion
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
 
 class LLMService:
     """
@@ -98,7 +100,9 @@ class LLMService:
 
         # Add safety settings for Google models
         if config["provider"] == "google":
-            kwargs["safety_settings"] = LLMService.prepare_google_safety_settings()
+            kwargs["safety_settings"] = (
+                LLMService.prepare_google_safety_settings()
+            )
             
         return kwargs
     
@@ -117,21 +121,29 @@ class LLMService:
         if "api_key" in logging_payload:
             api_key = logging_payload["api_key"]
             if isinstance(api_key, str) and len(api_key) > 8:
-                logging_payload["api_key"] = api_key[:4] + "..." + api_key[-4:]
+                logging_payload["api_key"] = (
+                    api_key[:4] + "..." + api_key[-4:]
+                )
         
         # Redact base64 image data in content
         for message in logging_payload.get('messages', []):
             if isinstance(message.get('content'), list):
                 for item in message['content']:
-                    if item.get('type') == 'image_url' and 'url' in item.get('image_url', {}):
+                    if (item.get('type') == 'image_url' and 
+                            'url' in item.get('image_url', {})):
                         url = item['image_url']['url']
                         if url.startswith('data:'):
                             prefix = url.split(',')[0] + ','
                             data = url.split(',')[1]
                             if len(data) > 20:
-                                item['image_url']['url'] = prefix + data[:10] + "..." + data[-10:]
+                                item['image_url']['url'] = (
+                                    prefix + data[:10] + "..." + data[-10:]
+                                )
         
-        logger.info(f"Payload being sent to LLM API:\n{json.dumps(logging_payload, indent=2)}")
+        logger.info(
+            f"Payload being sent to LLM API:\n"
+            f"{json.dumps(logging_payload, indent=2)}"
+        )
     
     @staticmethod
     async def stream_completion(
@@ -158,29 +170,44 @@ class LLMService:
         
         while retry_count < max_retries:
             try:
-                kwargs = LLMService.prepare_request_payload(messages, config, current_api_key)
+                kwargs = LLMService.prepare_request_payload(
+                    messages, config, current_api_key
+                )
                 await LLMService.log_request_payload(kwargs)
                 
-                logger.info(f"Attempt {retry_count+1} for LLM completion using provider: {provider}")
+                logger.info(
+                    f"Attempt {retry_count+1} for LLM completion using "
+                    f"provider: {provider}"
+                )
                 response_stream = await acompletion(**kwargs)
                 
                 async for chunk in response_stream:
                     yield chunk
                 
                 # If we get here without exceptions, the stream was successful
-                logger.info(f"LLM completion stream completed successfully using provider: {provider}")
+                logger.info(
+                    f"LLM completion stream completed successfully using "
+                    f"provider: {provider}"
+                )
                 return
                 
             except Exception as e:
                 retry_count += 1
                 error_type = type(e).__name__
-                if "rate limit" in str(e).lower() or "too many requests" in str(e).lower():
+                error_msg = str(e).lower()
+                
+                if ("rate limit" in error_msg or 
+                        "too many requests" in error_msg):
                     logger.warning(
-                        f"Rate limit exceeded during LLM request (attempt {retry_count}/{max_retries}) for provider {provider}: {str(e)}"
+                        f"Rate limit exceeded during LLM request "
+                        f"(attempt {retry_count}/{max_retries}) for provider "
+                        f"{provider}: {str(e)}"
                     )
                 else:
                     logger.error(
-                        f"Error during LLM request (attempt {retry_count}/{max_retries}) for provider {provider}: {error_type}: {str(e)}",
+                        f"Error during LLM request "
+                        f"(attempt {retry_count}/{max_retries}) for provider "
+                        f"{provider}: {error_type}: {str(e)}",
                         exc_info=True
                     )
                 
@@ -188,9 +215,7 @@ class LLMService:
                     # Re-raise the exception on the last retry
                     raise
                 
-                # Get a new API key for the next attempt
-                # In a real implementation, this would call the API key manager
-                # Since we don't have direct access here, we just log the fact
+                # Log the retry attempt
                 logger.info(f"Retrying with a new API key for {provider}")
                 
                 # Small delay before retry
@@ -220,5 +245,8 @@ class LLMService:
             return True, stream
         except Exception as e:
             error_type = type(e).__name__
-            logger.error(f"Failed to get LLM completion: {error_type}: {str(e)}", exc_info=True)
+            logger.error(
+                f"Failed to get LLM completion: {error_type}: {str(e)}", 
+                exc_info=True
+            )
             return False, None

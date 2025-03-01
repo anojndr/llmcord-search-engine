@@ -9,10 +9,12 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Any, Optional, Literal
+
 from discord import Message, File
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
 
 @dataclass
 class MsgNode:
@@ -48,6 +50,8 @@ class MsgNode:
     
     def __post_init__(self):
         """Runs after initialization to log message creation."""
-        logger.debug(f"Created MsgNode: role={self.role}, user_id={self.user_id}, " 
-                    f"has_bad_attachments={self.has_bad_attachments}, "
-                    f"internet_used={self.internet_used}")
+        logger.debug(
+            f"Created MsgNode: role={self.role}, user_id={self.user_id}, "
+            f"has_bad_attachments={self.has_bad_attachments}, "
+            f"internet_used={self.internet_used}"
+        )

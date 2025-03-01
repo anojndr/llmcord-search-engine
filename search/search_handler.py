@@ -6,7 +6,8 @@ Delegates search queries to the SearchService and then wraps the results
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List, Optional
+
 import httpx
 
 from config.api_key_manager import APIKeyManager
@@ -15,6 +16,7 @@ from search.url_handler import fetch_urls_content
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
 
 async def handle_search_queries(
     queries: List[str],
@@ -37,19 +39,20 @@ async def handle_search_queries(
         A plain text string containing aggregated search results.
     """
     config = config or {}
-    max_urls: int = config.get("max_urls", 5)
+    max_urls = config.get("max_urls", 5)
     
     logger.info(f"Handling search for {len(queries)} queries with max_urls={max_urls}")
     
-    search_service: SearchService = SearchService(api_key_manager, httpx_client)
+    # Initialize search service
+    search_service = SearchService(api_key_manager, httpx_client)
     aggregated_results: Dict[str, SearchResult] = {}
     errors: List[str] = []
 
     # Perform search for each query
     for i, query in enumerate(queries, 1):
         logger.info(f"Searching for query {i}/{len(queries)}: '{query}'")
-        results: List[SearchResult]
-        error: Optional[str]
+        
+        # Get search results
         results, error = await search_service.search(query, max_urls)
         
         if error:
@@ -60,7 +63,10 @@ async def handle_search_queries(
         if results:
             logger.info(f"Search returned {len(results)} results for query: '{query}'")
             for j, res in enumerate(results, 1):
-                logger.debug(f"  Result {j}: URL={res.url}, Title={res.title[:50]}...")
+                logger.debug(
+                    f"  Result {j}: URL={res.url}, "
+                    f"Title={res.title[:50]}..."
+                )
         else:
             logger.warning(f"No results found for query: '{query}'")
         
@@ -69,18 +75,48 @@ async def handle_search_queries(
             if res.url not in aggregated_results:
                 aggregated_results[res.url] = res
 
-    dedup_results: List[SearchResult] = list(aggregated_results.values())
+    # Process results
+    dedup_results = list(aggregated_results.values())
     
     if not dedup_results:
         logger.warning("No search results found from any provider for any query")
         return "No search results found from any provider."
 
+    # Fetch content for each URL
     logger.info(f"Fetching content for {len(dedup_results)} unique URLs")
-    url_list: List[str] = [res.url for res in dedup_results]
-    contents: List[str] = await fetch_urls_content(url_list, api_key_manager, httpx_client, config=config)
+    url_list = [res.url for res in dedup_results]
+    contents = await fetch_urls_content(
+        url_list, api_key_manager, httpx_client, config=config
+    )
 
     # Format results as plain text
-    lines: List[str] = []
+    formatted_results = _format_search_results(
+        dedup_results, contents, errors
+    )
+    
+    logger.info(f"Successfully formatted {len(dedup_results)} search results")
+    return formatted_results
+
+
+def _format_search_results(
+    results: List[SearchResult],
+    contents: List[str],
+    errors: List[str]
+) -> str:
+    """
+    Format search results as plain text.
+    
+    Args:
+        results: List of search results
+        contents: List of URL contents
+        errors: List of error messages
+        
+    Returns:
+        Formatted text content
+    """
+    lines = []
+    
+    # Add error messages if any
     if errors:
         logger.warning(f"Found {len(errors)} errors during search")
         lines.append("Error Messages:")
@@ -90,8 +126,9 @@ async def handle_search_queries(
         
     lines.append("Aggregated Search Results:")
 
-    for idx, (res, content) in enumerate(zip(dedup_results, contents), start=1):
-        logger.debug(f"Formatting result {idx}/{len(dedup_results)}: {res.url}")
+    # Add each result with its content
+    for idx, (res, content) in enumerate(zip(results, contents), start=1):
+        logger.debug(f"Formatting result {idx}/{len(results)}: {res.url}")
         lines.append(f"Result {idx}:")
         
         # Check if Jina was used successfully
@@ -110,5 +147,4 @@ async def handle_search_queries(
         lines.append(content)
         lines.append("")
         
-    logger.info(f"Successfully formatted {len(dedup_results)} search results")
     return "\n".join(lines)

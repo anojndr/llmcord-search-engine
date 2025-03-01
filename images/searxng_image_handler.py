@@ -8,6 +8,7 @@ It defines helper functions to normalize, download and wrap image data as Discor
 import logging
 import asyncio
 from typing import Any, Tuple, List, Dict, Optional
+
 import httpx
 from io import BytesIO
 from discord import File
@@ -20,6 +21,7 @@ from images.utils import download_image
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
+
 
 async def fetch_images_from_searxng(
     query: str,
@@ -45,10 +47,11 @@ async def fetch_images_from_searxng(
     image_urls: List[str] = []
 
     try:
+        # Get SearxNG configuration
         searxng_config: Dict[str, Any] = get_searxng_config()
-
         language: str = searxng_config['language'].split('#')[0].strip()
 
+        # Prepare request parameters
         params: Dict[str, Any] = {
             'q': query,
             'format': 'json',
@@ -57,6 +60,7 @@ async def fetch_images_from_searxng(
             'categories': 'images'
         }
 
+        # Build URL with properly encoded parameters
         base_url: str = urljoin(searxng_config['base_url'], 'search')
         param_strings: List[str] = []
         for key, value in params.items():
@@ -67,22 +71,30 @@ async def fetch_images_from_searxng(
 
         logger.info(f"Making SearxNG images request to: {url}")
 
+        # Send request to SearxNG
         response: httpx.Response = await httpx_client.get(
             url,
             timeout=searxng_config['timeout']
         )
         response.raise_for_status()
 
+        # Process response
         data: Dict[str, Any] = response.json()
         if not data.get('results'):
             logger.warning(f"No image results found from SearxNG for query: {query}")
             return [], []
 
+        # Queue image download tasks
         image_tasks: List[asyncio.Task] = []
         urls_to_try: List[str] = []
 
-        source_urls: Dict[str, str] = {result.get('source_url'): result.get('img_src') for result in data['results']}
+        # Create mapping of source URLs to image URLs
+        source_urls: Dict[str, str] = {
+            result.get('source_url'): result.get('img_src') 
+            for result in data['results']
+        }
 
+        # Create download tasks for each image
         for result in data['results'][:num_images * 2]:
             if 'img_src' in result:
                 img_url: str = result['img_src']
@@ -91,11 +103,15 @@ async def fetch_images_from_searxng(
                 image_tasks.append(download_image(img_url, httpx_client, source_url))
 
         if not image_tasks:
-            logger.warning(f"No valid image URLs found in SearxNG results for query: {query}")
+            logger.warning(
+                f"No valid image URLs found in SearxNG results for query: {query}"
+            )
             return [], []
 
+        # Execute all download tasks concurrently
         downloaded_images: List[Optional[bytes]] = await asyncio.gather(*image_tasks)
 
+        # Process downloaded images
         successful_downloads: int = 0
         for idx, image_data in enumerate(downloaded_images):
             if image_data is None:
@@ -104,19 +120,29 @@ async def fetch_images_from_searxng(
                     image_urls.append(urls_to_try[idx])
             else:
                 if successful_downloads < num_images:
-                    image_file: File = File(BytesIO(image_data), filename=f"image_{len(image_files) + 1}.png")
+                    image_file: File = File(
+                        BytesIO(image_data), 
+                        filename=f"image_{len(image_files) + 1}.png"
+                    )
                     image_files.append(image_file)
                     successful_downloads += 1
 
             if successful_downloads >= num_images:
                 break
 
-        logger.info(f"SearxNG returned {successful_downloads} images and {len(image_urls)} failed URLs for query: {query}")
+        logger.info(
+            f"SearxNG returned {successful_downloads} images and "
+            f"{len(image_urls)} failed URLs for query: {query}"
+        )
         return image_files, image_urls
 
     except Exception as e:
-        logger.error(f"Error in SearxNG image search for query '{query}': {str(e)}", exc_info=True)
+        logger.error(
+            f"Error in SearxNG image search for query '{query}': {str(e)}", 
+            exc_info=True
+        )
         return [], []
+
 
 async def fetch_images(
     queries: List[str],
@@ -143,24 +169,43 @@ async def fetch_images(
     image_urls_dict: Dict[str, List[str]] = {}
 
     for query in queries:
+        # Try SearxNG first
         files: List[File]
         urls: List[str]
-        files, urls = await fetch_images_from_searxng(query, num_images, api_key_manager, httpx_client)
+        files, urls = await fetch_images_from_searxng(
+            query, num_images, api_key_manager, httpx_client
+        )
 
+        # If SearxNG found no images, fall back to Serper
         if not files and not urls:
-            logger.info(f"SearxNG found no images for query '{query}'. Falling back to Serper.")
-            files, urls = await fetch_images_from_serper([query], num_images, api_key_manager, httpx_client)
-            if isinstance(files, list):
-                files = files
+            logger.info(
+                f"SearxNG found no images for query '{query}'. "
+                f"Falling back to Serper."
+            )
+            fallback_files, fallback_urls = await fetch_images_from_serper(
+                [query], num_images, api_key_manager, httpx_client
+            )
+            
+            # Validate fallback results
+            if isinstance(fallback_files, list):
+                files = fallback_files
             else:
-                logger.warning(f"Serper returned invalid files type for query '{query}': {type(files)}")
+                logger.warning(
+                    f"Serper returned invalid files type for query '{query}': "
+                    f"{type(fallback_files)}"
+                )
                 files = []
-            if isinstance(urls, list):
-                urls = urls
+                
+            if isinstance(fallback_urls, list):
+                urls = fallback_urls
             else:
-                logger.warning(f"Serper returned invalid URLs type for query '{query}': {type(urls)}")
+                logger.warning(
+                    f"Serper returned invalid URLs type for query '{query}': "
+                    f"{type(fallback_urls)}"
+                )
                 urls = []
 
+        # Store results for this query
         image_files_dict[query] = files
         image_urls_dict[query] = urls
 

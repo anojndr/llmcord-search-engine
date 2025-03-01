@@ -12,7 +12,11 @@ import sys
 from typing import Optional
 from datetime import datetime
 
-def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> None:
+
+def setup_logging(
+    log_level: str = "INFO", 
+    log_file: Optional[str] = None
+) -> None:
     """
     Set up logging configuration for the application.
     
@@ -40,6 +44,10 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> No
     root_logger = logging.getLogger()
     root_logger.setLevel(numeric_level)
     
+    # Clear existing handlers
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
     # Define formatter
     log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     date_format = "%Y-%m-%d %H:%M:%S"
@@ -66,12 +74,16 @@ def setup_logging(log_level: str = "INFO", log_file: Optional[str] = None) -> No
     # Add separate handler for warning, error, and critical logs
     warnings_errors_file = os.path.join(logs_dir, "warnings_errors_criticals.txt")
     warnings_errors_handler = logging.FileHandler(warnings_errors_file)
-    warnings_errors_handler.setLevel(logging.WARNING)  # WARNING level includes WARNING, ERROR, and CRITICAL
+    warnings_errors_handler.setLevel(logging.WARNING)
     warnings_errors_handler.setFormatter(formatter)
     root_logger.addHandler(warnings_errors_handler)
     
     # Log startup message
-    logging.info(f"Logging initialized: level={log_level}, log_file={log_file or 'None'}, warnings_errors_file={warnings_errors_file}")
+    logging.info(
+        f"Logging initialized: level={log_level}, log_file={log_file or 'None'}, "
+        f"warnings_errors_file={warnings_errors_file}"
+    )
+
 
 def get_logger(name: str) -> logging.Logger:
     """

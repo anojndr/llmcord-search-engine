@@ -7,9 +7,10 @@ It registers the command and handles the execution to set the model and provider
 
 import logging
 import os
+from typing import Optional, Dict, Any, List
+
 import discord
 from discord import app_commands
-from typing import Optional, Dict, Any, List
 
 from config.config_manager import get_config
 from config.api_key_manager import APIKeyManager
@@ -29,10 +30,16 @@ PROVIDER_MODELS = {
     ],
 }
 
+
 class ModelCommand:
     """Handler for the /model slash command."""
     
-    def __init__(self, client: discord.Client, api_key_manager: APIKeyManager, command_tree: app_commands.CommandTree):
+    def __init__(
+        self, 
+        client: discord.Client, 
+        api_key_manager: APIKeyManager, 
+        command_tree: app_commands.CommandTree
+    ):
         """
         Initialize the command handler.
         
@@ -53,7 +60,7 @@ class ModelCommand:
         
         @self.tree.command(
             name="model",
-            description="Set the provider and model for the bot (format: /model provider: xxx model: xxx)"
+            description="Set the provider and model for the bot"
         )
         @app_commands.describe(
             provider="The AI provider to use",
@@ -63,7 +70,7 @@ class ModelCommand:
             interaction: discord.Interaction, 
             provider: str,
             model: str
-        ) -> None:  # type: ignore
+        ) -> None:
             """
             Set the model and provider for the bot.
             
@@ -77,18 +84,29 @@ class ModelCommand:
             
             # Check if provider is valid
             if provider not in PROVIDER_MODELS:
-                logger.warning(f"Invalid provider '{provider}' requested by {interaction.user.name} ({interaction.user.id})")
+                logger.warning(
+                    f"Invalid provider '{provider}' requested by "
+                    f"{interaction.user.name} ({interaction.user.id})"
+                )
+                available_providers = ", ".join(PROVIDER_MODELS.keys())
                 await interaction.followup.send(
-                    f"Invalid provider: {provider}. Available providers: {', '.join(PROVIDER_MODELS.keys())}",
+                    f"Invalid provider: {provider}. Available providers: "
+                    f"{available_providers}",
                     ephemeral=False
                 )
                 return
             
             # Check if model is valid for this provider
             if model not in PROVIDER_MODELS[provider]:
-                logger.warning(f"Invalid model '{model}' for provider '{provider}' requested by {interaction.user.name} ({interaction.user.id})")
+                logger.warning(
+                    f"Invalid model '{model}' for provider '{provider}' "
+                    f"requested by {interaction.user.name} "
+                    f"({interaction.user.id})"
+                )
+                available_models = ", ".join(PROVIDER_MODELS[provider])
                 await interaction.followup.send(
-                    f"Invalid model: {model} for provider {provider}. Available models: {', '.join(PROVIDER_MODELS[provider])}",
+                    f"Invalid model: {model} for provider {provider}. "
+                    f"Available models: {available_models}",
                     ephemeral=False
                 )
                 return
@@ -108,10 +126,17 @@ class ModelCommand:
                     ephemeral=False
                 )
                 
-                logger.info(f"Model changed from {old_provider}/{old_model} to {provider}/{model} by {interaction.user.name} ({interaction.user.id})")
+                logger.info(
+                    f"Model changed from {old_provider}/{old_model} to "
+                    f"{provider}/{model} by {interaction.user.name} "
+                    f"({interaction.user.id})"
+                )
             
             except Exception as e:
-                logger.error(f"Error setting model to {provider}/{model}: {e}", exc_info=True)
+                logger.error(
+                    f"Error setting model to {provider}/{model}: {e}", 
+                    exc_info=True
+                )
                 await interaction.followup.send(
                     f"An error occurred: {str(e)}",
                     ephemeral=False
@@ -119,7 +144,7 @@ class ModelCommand:
         
         # Implement autocomplete for provider parameter
         @model.autocomplete('provider')
-        async def provider_autocomplete(  # type: ignore
+        async def provider_autocomplete(
             interaction: discord.Interaction,
             current: str,
         ) -> List[app_commands.Choice[str]]:
@@ -136,7 +161,10 @@ class ModelCommand:
             providers = list(PROVIDER_MODELS.keys())
             
             # Filter providers based on current input
-            filtered = [provider for provider in providers if current.lower() in provider.lower()]
+            filtered = [
+                provider for provider in providers 
+                if current.lower() in provider.lower()
+            ]
             
             # Return up to 25 choices (Discord limit)
             return [
@@ -146,7 +174,7 @@ class ModelCommand:
         
         # Implement autocomplete for model parameter
         @model.autocomplete('model')
-        async def model_autocomplete(  # type: ignore
+        async def model_autocomplete(
             interaction: discord.Interaction,
             current: str,
         ) -> List[app_commands.Choice[str]]:
@@ -175,7 +203,10 @@ class ModelCommand:
             models = PROVIDER_MODELS[provider_option]
             
             # Filter models based on current input
-            filtered = [model for model in models if current.lower() in model.lower()]
+            filtered = [
+                model for model in models 
+                if current.lower() in model.lower()
+            ]
             
             # Return up to 25 choices (Discord limit)
             return [
@@ -183,8 +214,12 @@ class ModelCommand:
                 for model in filtered[:25]
             ]
 
-# Function to setup the command
-def setup_model_command(client: discord.Client, api_key_manager: APIKeyManager, command_tree: app_commands.CommandTree) -> ModelCommand:
+
+def setup_model_command(
+    client: discord.Client, 
+    api_key_manager: APIKeyManager, 
+    command_tree: app_commands.CommandTree
+) -> ModelCommand:
     """
     Set up the /model command.
     

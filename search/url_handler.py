@@ -10,13 +10,14 @@ Synchronous parsing operations are offloaded to threads for concurrency.
 """
 
 import asyncio
-import re
 import logging
-from typing import List, Optional, Dict, Any
-from bs4 import BeautifulSoup, Comment
+import re
+from typing import Dict, Any, List, Optional
+
 import httpx
-from PyPDF2 import PdfReader
+from bs4 import BeautifulSoup, Comment
 from io import BytesIO
+from PyPDF2 import PdfReader
 
 from config.api_key_manager import APIKeyManager
 from providers.youtube_handler import fetch_youtube_content
@@ -24,6 +25,7 @@ from providers.reddit_handler import fetch_reddit_content
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
 
 def extract_urls_from_text(text: str) -> List[str]:
     """
@@ -36,8 +38,9 @@ def extract_urls_from_text(text: str) -> List[str]:
         A list of URLs found.
     """
     url_pattern = re.compile(r'(https?://\S+)')
-    urls: List[str] = re.findall(url_pattern, text)
+    urls = re.findall(url_pattern, text)
     return urls
+
 
 def parse_html_content(html_content: str) -> str:
     """
@@ -50,13 +53,25 @@ def parse_html_content(html_content: str) -> str:
     Returns:
         Extracted text content.
     """
-    soup: BeautifulSoup = BeautifulSoup(html_content, 'lxml')
-    for tag in soup(['script', 'style', 'header', 'footer', 'nav', 'aside', 'form', 'svg', 'canvas']):
-        tag.decompose()
-    for c in soup.find_all(text=lambda text: isinstance(text, Comment)):
-        c.extract()
-    text_content: str = soup.get_text(separator=' ', strip=True)[:20000]
-    return text_content
+    try:
+        # Create BeautifulSoup object
+        soup = BeautifulSoup(html_content, 'lxml')
+        
+        # Remove script, style, and other non-content elements
+        for tag in soup(['script', 'style', 'header', 'footer', 'nav', 'aside', 'form', 'svg', 'canvas']):
+            tag.decompose()
+            
+        # Remove comments
+        for comment in soup.find_all(text=lambda text: isinstance(text, Comment)):
+            comment.extract()
+            
+        # Extract text
+        text_content = soup.get_text(separator=' ', strip=True)[:20000]
+        return text_content
+    except Exception as e:
+        logger.error(f"Error parsing HTML content: {e}", exc_info=True)
+        return f"Error extracting text from HTML: {e}"
+
 
 def parse_pdf_content(pdf_bytes: bytes) -> str:
     """
@@ -70,19 +85,25 @@ def parse_pdf_content(pdf_bytes: bytes) -> str:
         Extracted text content or error message.
     """
     try:
-        reader: PdfReader = PdfReader(BytesIO(pdf_bytes))
-        text_content: str = ''
+        reader = PdfReader(BytesIO(pdf_bytes))
+        text_content = ''
         for page in reader.pages:
-            text: Optional[str] = page.extract_text()
+            text = page.extract_text()
             if text:
                 text_content += text + '\n'
         if not text_content:
             text_content = "No extractable text found in PDF."
         return text_content[:20000]
     except Exception as e:
+        logger.error(f"Error extracting text from PDF: {e}", exc_info=True)
         return f"Error extracting text from PDF: {e}"
 
-async def fetch_single_url_content(url: str, api_key_manager: APIKeyManager, httpx_client: httpx.AsyncClient) -> str:
+
+async def fetch_single_url_content(
+    url: str, 
+    api_key_manager: APIKeyManager, 
+    httpx_client: httpx.AsyncClient
+) -> str:
     """
     Fetch and convert the content of a single URL to plain text.
     Synchronous parsing (HTML, PDF) is offloaded to threads.
@@ -95,42 +116,54 @@ async def fetch_single_url_content(url: str, api_key_manager: APIKeyManager, htt
     Returns:
         Plain text content string, truncated to 20,000 characters.
     """
+    # Handle special URL types
     if 'youtube.com' in url or 'youtu.be' in url:
-        content: str = await fetch_youtube_content(url, api_key_manager, httpx_client)
+        content = await fetch_youtube_content(url, api_key_manager, httpx_client)
         return f"YouTube Content:\n{content[:20000]}"
     elif 'reddit.com' in url or 'redd.it' in url:
-        content: str = await fetch_reddit_content(url, api_key_manager, httpx_client)
+        content = await fetch_reddit_content(url, api_key_manager, httpx_client)
         return f"Reddit Content:\n{content[:20000]}"
-    else:
-        jina_url: str = "https://r.jina.ai/" + url
-        try:
-            response: httpx.Response = await httpx_client.get(jina_url, timeout=10.0)
-            response.raise_for_status()
-            text_content: str = response.text.strip()[:20000]
-            return f"__JINA_SUCCESS__\n{text_content}"
-        except httpx.HTTPError:
-            try:
-                response: httpx.Response = await httpx_client.get(url, timeout=10.0, follow_redirects=True)
-                response.raise_for_status()
-                content_type: str = response.headers.get('Content-Type', '')
+    
+    # Try Jina first
+    try:
+        jina_url = "https://r.jina.ai/" + url
+        logger.debug(f"Trying Jina URL: {jina_url}")
+        
+        response = await httpx_client.get(jina_url, timeout=10.0)
+        response.raise_for_status()
+        text_content = response.text.strip()[:20000]
+        return f"__JINA_SUCCESS__\n{text_content}"
+    except httpx.HTTPError:
+        logger.debug(f"Jina failed for URL: {url}, falling back to direct fetch")
+    except Exception as e:
+        logger.error(f"Error fetching content with jina_ai from {url}: {e}", exc_info=True)
+    
+    # Fallback to direct fetch
+    try:
+        logger.debug(f"Fetching URL directly: {url}")
+        response = await httpx_client.get(url, timeout=10.0, follow_redirects=True)
+        response.raise_for_status()
+        content_type = response.headers.get('Content-Type', '')
 
-                if 'application/pdf' in content_type:
-                    pdf_bytes: bytes = response.content
-                    text_content: str = await asyncio.to_thread(parse_pdf_content, pdf_bytes)
-                    return f"PDF Content (fallback):\n{text_content}"
-                elif 'text/html' in content_type:
-                    html_content: str = response.text
-                    text_content: str = await asyncio.to_thread(parse_html_content, html_content)
-                    return f"Extracted Content (BeautifulSoup fallback):\n{text_content}"
-                else:
-                    text_content: str = response.text[:20000]
-                    return text_content
-            except Exception as e:
-                logger.error(f"Error fetching content from {url}: {e}")
-                return f"Error fetching content from {url}: {e}"
-        except Exception as e:
-            logger.error(f"Error fetching content with jina_ai from {url}: {e}")
-            return f"Error fetching content with jina_ai from {url}: {e}"
+        # Handle different content types
+        if 'application/pdf' in content_type:
+            logger.debug(f"Processing PDF content from {url}")
+            pdf_bytes = response.content
+            text_content = await asyncio.to_thread(parse_pdf_content, pdf_bytes)
+            return f"PDF Content (fallback):\n{text_content}"
+        elif 'text/html' in content_type:
+            logger.debug(f"Processing HTML content from {url}")
+            html_content = response.text
+            text_content = await asyncio.to_thread(parse_html_content, html_content)
+            return f"Extracted Content (BeautifulSoup fallback):\n{text_content}"
+        else:
+            logger.debug(f"Processing plain text content from {url}")
+            text_content = response.text[:20000]
+            return text_content
+    except Exception as e:
+        logger.error(f"Error fetching content from {url}: {e}", exc_info=True)
+        return f"Error fetching content from {url}: {e}"
+
 
 async def fetch_urls_content(
     urls: List[str],
@@ -154,6 +187,15 @@ async def fetch_urls_content(
     if config is None:
         config = {}
 
-    tasks: List[asyncio.Task] = [fetch_single_url_content(url, api_key_manager, httpx_client) for url in urls]
-    contents: List[str] = await asyncio.gather(*tasks)
+    # Create a task for each URL
+    logger.info(f"Fetching content for {len(urls)} URLs")
+    tasks = [
+        fetch_single_url_content(url, api_key_manager, httpx_client) 
+        for url in urls
+    ]
+    
+    # Execute all tasks concurrently
+    contents = await asyncio.gather(*tasks)
+    logger.info(f"Completed content fetch for {len(urls)} URLs")
+    
     return contents
