@@ -100,11 +100,16 @@ async def download_image(
         Downloaded image data, or None if download fails.
     """
     try:
+        # Check for empty URL
+        if not image_url or image_url.strip() == "":
+            logger.warning("Empty image URL provided")
+            return None
+
         # Normalize the URL
         normalized_url: Optional[str] = normalize_image_url(image_url, base_url)
         if not normalized_url:
             logger.warning(f"Unable to normalize image URL: {image_url}")
-            raise ValueError(f"Invalid image URL: {image_url}")
+            return None
 
         # Handle data URLs
         if normalized_url.startswith('data:'):
@@ -116,23 +121,67 @@ async def download_image(
             logger.debug("Processing non-base64 data URL")
             return data.encode('utf-8')
 
-        # Handle HTTP URLs
+        # Set common headers for image requests
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
+        }
+        
+        # Handle HTTP URLs with explicit redirect handling
         logger.debug(f"Downloading image from URL: {normalized_url}")
-        response: httpx.Response = await httpx_client.get(normalized_url, timeout=10.0)
+        response: httpx.Response = await httpx_client.get(
+            normalized_url, 
+            timeout=10.0,
+            follow_redirects=True,  # Enable following redirects
+            headers=headers
+        )
         response.raise_for_status()
 
-        # Validate content type
+        # Get content type, defaulting to empty string if not present
         content_type: str = response.headers.get('content-type', '').lower()
-        if not any(img_type in content_type for img_type in ['image/', 'application/octet-stream']):
-            logger.warning(
-                f"Invalid content type: {content_type} for URL: {normalized_url}"
-            )
-            raise ValueError(f"Invalid content type: {content_type}")
-
-        logger.debug(f"Successfully downloaded image ({len(response.content)} bytes)")
-        return response.content
+        
+        # List of acceptable image content types
+        valid_image_types = [
+            'image/', 
+            'application/octet-stream',
+            'binary/',
+            'multipart/form-data'
+        ]
+        
+        # Check if content type is valid for images
+        is_valid_type = any(type_str in content_type for type_str in valid_image_types)
+        
+        # Special case handling for known problematic domains
+        special_case_domains = ['facebook', 'fbcdn', 'fbsbx', 'pinterest', 'pinimg']
+        is_special_domain = any(domain in normalized_url for domain in special_case_domains)
+        
+        # Process content if valid type or special case with reasonable size (> 1KB)
+        if is_valid_type or (is_special_domain and len(response.content) > 1000):
+            logger.debug(f"Successfully downloaded image ({len(response.content)} bytes)")
+            return response.content
+        
+        # If we get here, content doesn't meet image criteria
+        logger.warning(f"Invalid content type: {content_type} for URL: {normalized_url}")
+        return None
 
     except httpx.HTTPError as http_err:
+        # Handle redirect errors specifically
+        if '301' in str(http_err) or '302' in str(http_err) or 'redirect' in str(http_err).lower():
+            logger.warning(f"Redirect error for URL {image_url}")
+            
+            # Try to extract the redirect location
+            redirect_location = None
+            if hasattr(http_err, 'response') and 'location' in http_err.response.headers:
+                redirect_location = http_err.response.headers['location']
+                logger.info(f"Redirect location: {redirect_location}")
+                
+                # Try to follow the redirect manually as last resort
+                try:
+                    logger.debug(f"Attempting to follow redirect manually to: {redirect_location}")
+                    return await download_image(redirect_location, httpx_client, base_url)
+                except Exception as redirect_err:
+                    logger.error(f"Error following redirect manually: {redirect_err}")
+                    
         logger.error(f"HTTP error downloading image from {image_url}: {http_err}")
         return None
     except ValueError as ve:
