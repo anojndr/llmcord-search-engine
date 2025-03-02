@@ -12,14 +12,26 @@ from typing import Dict, Any, List
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+# Cache for storing the loaded configuration
+_cached_config = None
 
-def get_config() -> Dict[str, Any]:
+
+def get_config(force_reload: bool = False) -> Dict[str, Any]:
     """
     Load configuration from environment variables.
+    
+    Args:
+        force_reload: If True, force reload the configuration even if cached.
     
     Returns:
         A dictionary containing the application configuration.
     """
+    global _cached_config
+    
+    # If we have a cached config and don't need to force reload, use it
+    if _cached_config is not None and not force_reload:
+        return _cached_config
+    
     logger.info("Loading application configuration")
     
     # Load system prompt
@@ -54,6 +66,10 @@ def get_config() -> Dict[str, Any]:
         f"Configuration loaded successfully. Using provider: "
         f"{config['provider']}, model: {config['model']}"
     )
+    
+    # Cache the config for future use
+    _cached_config = config
+    
     return config
 
 

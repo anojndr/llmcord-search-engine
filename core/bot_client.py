@@ -136,17 +136,20 @@ class BotClient(discord.Client):
         
         return True
     
-    def check_permissions(self, message: Message) -> bool:
+    def check_permissions(self, message: Message, cfg: Dict[str, Any] = None) -> bool:
         """
         Check if the user and channel have permission to use the bot.
         
         Args:
             message: The Discord message
+            cfg: Optional pre-loaded configuration dictionary
             
         Returns:
             True if the user and channel have permission, False otherwise
         """
-        cfg = get_config()
+        if cfg is None:
+            cfg = get_config()
+            
         is_dm = message.channel.type == discord.ChannelType.private
         
         allow_dms = cfg["allow_dms"]
@@ -251,11 +254,13 @@ class BotClient(discord.Client):
         # Clean message content
         self.clean_message_content(new_msg)
         
-        # Check permissions
-        if not self.check_permissions(new_msg):
+        # Get configuration once
+        cfg = get_config()
+        
+        # Check permissions using the loaded config
+        if not self.check_permissions(new_msg, cfg):
             return
         
-        cfg = get_config()
         allowed_mentions = AllowedMentions.none()
         
         # Send initial progress message
