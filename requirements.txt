@@ -13,3 +13,4 @@ dataclasses-json
 aiocache
 litellm
 asyncpraw
+fake-useragent

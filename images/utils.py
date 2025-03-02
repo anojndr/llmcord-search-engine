@@ -10,6 +10,7 @@ from typing import Optional
 from urllib.parse import urljoin, urlparse
 
 import httpx
+from fake_useragent import UserAgent
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -121,11 +122,17 @@ async def download_image(
             logger.debug("Processing non-base64 data URL")
             return data.encode('utf-8')
 
-        # Set common headers for image requests
+        # Use fake-useragent to generate a random user agent
+        ua = UserAgent()
+        random_user_agent = ua.random
+        
+        # Set common headers for image requests with random user agent
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'User-Agent': random_user_agent,
             'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
         }
+        
+        logger.debug(f"Using random user agent: {random_user_agent}")
         
         # Handle HTTP URLs with explicit redirect handling
         logger.debug(f"Downloading image from URL: {normalized_url}")
