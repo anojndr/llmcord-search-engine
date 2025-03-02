@@ -7,6 +7,7 @@ It registers the command and handles the execution.
 
 import logging
 from typing import Optional, Dict, Any
+import io
 
 import discord
 from discord import app_commands
@@ -105,19 +106,40 @@ class GenerateImageCommand:
                 )
                 
                 if success:
-                    # Create an embed with the image
-                    embed = discord.Embed(
-                        title="Generated Image",
-                        description=f"Prompt: {prompt}",
-                        color=discord.Color.blue()
-                    )
-                    embed.set_image(url=result)
-                    
-                    # Send the image
-                    logger.info(
-                        f"Successfully generated image for prompt: '{prompt}'"
-                    )
-                    await interaction.followup.send(embed=embed)
+                    # Check if result is image data (bytes) or a string
+                    if isinstance(result, bytes):
+                        # Create a file from the image data
+                        file = discord.File(io.BytesIO(result), filename="generated_image.png")
+                        
+                        # Create an embed
+                        embed = discord.Embed(
+                            title="Generated Image",
+                            description=f"Prompt: {prompt}",
+                            color=discord.Color.blue()
+                        )
+                        
+                        # Set the image to use the attachment
+                        embed.set_image(url="attachment://generated_image.png")
+                        
+                        # Send the image
+                        logger.info(
+                            f"Successfully generated image for prompt: '{prompt}'"
+                        )
+                        await interaction.followup.send(file=file, embed=embed)
+                    else:
+                        # Handle the case where result is a string (likely a URL)
+                        embed = discord.Embed(
+                            title="Generated Image",
+                            description=f"Prompt: {prompt}",
+                            color=discord.Color.blue()
+                        )
+                        embed.set_image(url=result)
+                        
+                        # Send the image
+                        logger.info(
+                            f"Successfully generated image for prompt: '{prompt}'"
+                        )
+                        await interaction.followup.send(embed=embed)
                 else:
                     # Send error message
                     logger.warning(f"Failed to generate image: {result}")

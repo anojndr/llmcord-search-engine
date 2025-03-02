@@ -28,6 +28,9 @@ PROVIDER_MODELS = {
         "mistral/mistral-large-latest",
         "mistral/pixtral-large-latest",
     ],
+    "together_ai": [
+        "together_ai/deepseek-ai/DeepSeek-R1-Distill-Llama-70B-free",
+    ],
 }
 
 

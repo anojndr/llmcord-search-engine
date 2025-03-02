@@ -83,16 +83,3 @@ def setup_logging(
         f"Logging initialized: level={log_level}, log_file={log_file or 'None'}, "
         f"warnings_errors_file={warnings_errors_file}"
     )
-
-
-def get_logger(name: str) -> logging.Logger:
-    """
-    Get a logger with the specified name.
-    
-    Args:
-        name: Logger name, typically the module name
-    
-    Returns:
-        Configured logger instance
-    """
-    return logging.getLogger(name)

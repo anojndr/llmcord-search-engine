@@ -5,13 +5,6 @@ This module defines the Discord bot client class that handles message events
 and coordinates the different components of the application.
 """
 
-"""
-Bot Client Module
-
-This module defines the Discord bot client class that handles message events
-and coordinates the different components of the application.
-"""
-
 import asyncio
 import logging
 import re

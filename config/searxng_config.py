@@ -6,7 +6,7 @@ It returns a dictionary used for constructing SearxNG API URLs.
 """
 
 import os
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional
 import logging
 
 logger = logging.getLogger(__name__)
@@ -128,32 +128,3 @@ def _parse_safe_search(safe_search_str: str) -> int:
             f"default of 1. Error: {str(e)}"
         )
         return 1
-
-
-def parse_value_with_comments(
-    value_str: str,
-    convert_func: Callable[[str], Any],
-    default_value: Any,
-    value_name: str
-) -> Any:
-    """
-    Parse a value from a string, ignoring any in-line comments.
-
-    Args:
-        value_str: The raw value string.
-        convert_func: Conversion function (int, float, etc.).
-        default_value: Value to use if conversion fails.
-        value_name: Name of the setting (for logging).
-
-    Returns:
-        The converted value.
-    """
-    value_str = value_str.split('#')[0].strip()
-    try:
-        return convert_func(value_str)
-    except (ValueError, TypeError) as e:
-        logger.warning(
-            f"Invalid {value_name} value: '{value_str}'. Using default of "
-            f"{default_value}. Error: {str(e)}"
-        )
-        return default_value

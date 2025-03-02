@@ -247,21 +247,3 @@ def _parse_query_splitter_response(content: str, original_query: str) -> List[st
             exc_info=True
         )
         return [original_query]
-
-
-def truncate_base64(base64_string: str, max_length: int = 50) -> str:
-    """
-    Utility function to truncate long base64 strings for logging purposes.
-    
-    Args:
-        base64_string: Base64 encoded string to truncate
-        max_length: Maximum length to show before truncating
-        
-    Returns:
-        Truncated string with ellipsis
-    """
-    if not base64_string:
-        return ""
-    if len(base64_string) > max_length:
-        return base64_string[:max_length] + "..."
-    return base64_string

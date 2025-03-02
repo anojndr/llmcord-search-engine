@@ -92,8 +92,7 @@ def parse_comments(comments: Any) -> List[Dict[str, Any]]:
 async def fetch_reddit_content(
     url: str,
     api_key_manager: APIKeyManager,
-    httpx_client: Optional[httpx.AsyncClient] = None,
-    retries: int = 3
+    httpx_client: Optional[httpx.AsyncClient] = None
 ) -> str:
     """
     Fetch a Reddit submission and its comments, then output a plain text block.
@@ -103,7 +102,6 @@ async def fetch_reddit_content(
         url: URL of the Reddit post.
         api_key_manager: Unused parameter kept for interface compatibility.
         httpx_client: Unused, kept for compatibility.
-        retries: Number of retries (unused in the current implementation).
 
     Returns:
         A plain text string containing the submission details and comments.

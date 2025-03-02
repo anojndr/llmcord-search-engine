@@ -327,7 +327,8 @@ def _load_api_config() -> Dict[str, Any]:
     # Load provider API keys
     provider_configs = {}
     providers = [
-        "openai", "x-ai", "google", "mistral", "groq", "openrouter", "claude"
+        "openai", "x-ai", "google", "mistral", "groq", "openrouter", "claude", 
+        "together_ai"
     ]
     
     for provider in providers:
