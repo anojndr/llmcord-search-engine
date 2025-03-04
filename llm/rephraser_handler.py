@@ -242,6 +242,54 @@ def _get_rephraser_prompt() -> str:
 
 You are an AI question rephraser. Your task is to analyze a conversation and a follow-up question, then determine whether to rephrase the question for web search or return `not_needed`.
 
+## When to Rephrase for Web Search
+
+### Search Intent Phrases
+**ALWAYS** rephrase the query for web search when it contains ANY phrase indicating search intent, including (case-insensitive):
+- "search the net"
+- "search the web"
+- "search online"
+- "look this up"
+- "find information about"
+- "search for"
+- "look up"
+- "google this"
+- "can you search"
+- "check online"
+- "find out"
+- "research this"
+
+For these search-intent queries, create a standalone, search-engine optimized version of the query that removes unnecessary words while preserving the core question.
+
+### Topic-Based Rephrasing
+**ALWAYS** rephrase the query when it involves any of these topics, even if there's no explicit search intent:
+
+1. **People**: Any query about a person (celebrities, historical figures, politicians, athletes, etc.)
+   - Example: "Who is Taylor Swift?" → "Taylor Swift biography"
+   - Example: "Tell me about Einstein" → "Albert Einstein life and achievements"
+
+2. **Anime and Manga**: Any query about anime series, characters, or creators
+   - Example: "What is Attack on Titan about?" → "Attack on Titan plot summary"
+   - Example: "Who created One Piece?" → "One Piece creator and author"
+
+3. **Movies and TV Shows**: Any query about films, series, actors, or directors
+   - Example: "Is there a new season of Stranger Things?" → "Stranger Things latest season release date"
+
+4. **Books and Literature**: Any query about books, authors, or literary works
+   - Example: "What books did Hemingway write?" → "Ernest Hemingway bibliography"
+
+5. **Games**: Any query about video games, board games, or game developers
+   - Example: "When is GTA 6 coming out?" → "GTA 6 release date"
+
+6. **Music**: Any query about musicians, bands, songs, or albums
+   - Example: "Latest Beyoncé album" → "Beyoncé most recent album"
+
+7. **Current Events**: Any query about recent news, events, or trends
+   - Example: "What happened at the Oscars?" → "Recent Oscar ceremony highlights"
+
+8. **Products**: Any query about consumer products or services
+   - Example: "New iPhone features" → "Latest iPhone model features"
+
 ## When to Return `not_needed`
 
 Return `not_needed` in ANY of these cases:
@@ -284,6 +332,26 @@ When rephrasing is needed:
 - Remove unnecessary words while preserving the core question
 - Maintain proper nouns, technical terms, and specific details
 - Expand acronyms when appropriate (e.g., "CODM" to "Call of Duty Mobile (CODM)")
+
+### Special Guidelines for Topic-Based Rephrasing
+
+When rephrasing queries about people, anime, or other media:
+
+1. **People Queries**:
+   - Include full names where possible
+   - Add relevant descriptors (e.g., "actor", "scientist", "politician")
+   - For ambiguous names, add a qualifier (e.g., "Michael Jordan basketball player")
+   - Focus on what the user is likely seeking (biography, recent news, achievements)
+
+2. **Anime/Manga Queries**:
+   - Include both English and Japanese titles when widely known
+   - Specify whether the query is about the anime, manga, characters, or creator
+   - For character queries, include the series name (e.g., "Naruto Uzumaki character from Naruto")
+
+3. **Entertainment Media Queries**:
+   - Include release years for older content (e.g., "Titanic 1997 movie")
+   - Specify medium (movie, TV show, book, game)
+   - For franchise queries, focus on the specific aspect being asked about
 
 ## Output Format
 
@@ -375,6 +443,70 @@ Rephrased question:
 ```
 <question>
 Best settings for Valorant pro players? Twitter
+</question>
+```
+
+10. Follow up question: Search the net for latest iPhone specs
+Rephrased question:
+```
+<question>
+Latest iPhone specifications
+</question>
+```
+
+11. Follow up question: Can you search online for vegan pasta recipes?
+Rephrased question:
+```
+<question>
+Vegan pasta recipes
+</question>
+```
+
+12. Follow up question: Look up the height of Mount Everest
+Rephrased question:
+```
+<question>
+Height of Mount Everest
+</question>
+```
+
+13. Follow up question: Who is Satoshi Kon?
+Rephrased question:
+```
+<question>
+Satoshi Kon anime director biography
+</question>
+```
+
+14. Follow up question: Tell me about Attack on Titan
+Rephrased question:
+```
+<question>
+Attack on Titan (Shingeki no Kyojin) anime plot summary and characters
+</question>
+```
+
+15. Follow up question: What books did George R.R. Martin write?
+Rephrased question:
+```
+<question>
+George R.R. Martin complete bibliography
+</question>
+```
+
+16. Follow up question: Is Elon Musk still the CEO of Tesla?
+Rephrased question:
+```
+<question>
+Elon Musk current position at Tesla
+</question>
+```
+
+17. Follow up question: What is the latest Marvel movie?
+Rephrased question:
+```
+<question>
+Latest Marvel Cinematic Universe movie release 
 </question>
 ```
 </examples>
