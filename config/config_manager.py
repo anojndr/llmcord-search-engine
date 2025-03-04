@@ -222,11 +222,6 @@ def _load_limit_config() -> Dict[str, Any]:
         0, 
         1
     )
-    max_tokens = _parse_positive_int(
-        os.getenv("EXTRA_API_PARAMETERS_MAX_TOKENS", "4096"), 
-        "MAX_TOKENS", 
-        4096
-    )
     
     return {
         "max_text": max_text,
@@ -236,7 +231,6 @@ def _load_limit_config() -> Dict[str, Any]:
         "extra_api_parameters": {
             "temperature": temperature,
             "top_p": top_p,
-            "max_tokens": max_tokens,
         },
     }
 
@@ -400,9 +394,6 @@ def _load_rephraser_config() -> Dict[str, Any]:
             "top_p": float(os.getenv(
                 "REPHRASER_EXTRA_API_PARAMETERS_TOP_P", "1"
             )),
-            "max_tokens": int(os.getenv(
-                "REPHRASER_EXTRA_API_PARAMETERS_MAX_TOKENS", "4096"
-            )),
         },
     }
 
@@ -425,9 +416,6 @@ def _load_query_splitter_config() -> Dict[str, Any]:
             )),
             "top_p": float(os.getenv(
                 "QUERY_SPLITTER_EXTRA_API_PARAMETERS_TOP_P", "1"
-            )),
-            "max_tokens": int(os.getenv(
-                "QUERY_SPLITTER_EXTRA_API_PARAMETERS_MAX_TOKENS", "4096"
             )),
         },
     }
