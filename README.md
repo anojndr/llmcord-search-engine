@@ -1,18 +1,41 @@
 <h1 align="center">
-  llmcord
+  llmcord_search_engine
 </h1>
 
 <h3 align="center"><i>
-  Talk to LLMs with your friends!
+  Talk to internet-connected LLMs with your friends on Discord!
 </i></h3>
 
 <p align="center">
   <img src="https://github.com/jakobdylanc/llmcord/assets/38699060/789d49fe-ef5c-470e-b60e-48ac03057443" alt="">
 </p>
 
-llmcord transforms Discord into a collaborative LLM frontend. It works with practically any LLM, remote or locally hosted.
+llmcord_search_engine transforms Discord into a collaborative AI frontend with real-time internet search capabilities. Building on the original llmcord project, this expanded version connects to virtually any LLM API and enhances interactions with web search, content extraction, and image processing.
 
-## Features
+## New Features in llmcord_search_engine
+
+### 🔍 Internet Search Integration
+- **Automatic search detection**: The bot intelligently determines when a query needs internet search and performs it automatically
+- **Multi-provider search**: Uses SearxNG with fallbacks to Serper and Bing, feeding all search results to the LLM for intelligent answers
+- **Image search results**: Search results include relevant images that can be displayed with a click
+- **URL content extraction**: Automatically extracts content from web pages, PDFs, and other sources and feeds it to the LLM for processing
+
+### 📱 Special Content Handlers
+- **YouTube integration**: Extracts video content, transcripts, and comments to feed directly to the LLM for intelligent processing
+- **Reddit integration**: Extracts post content, metadata, and comments for LLM analysis and summarization
+- **Image analysis**: Use "sauce" keyword with an image for SauceNAO-based reverse image search results that are analyzed by the LLM
+- **Image search**: Use "lens" keyword with an image for Google Lens-like visual search with LLM-processed results
+
+### 🖼️ Image Generation
+- **AI image generation**: Create images with the `/generateimage` command
+
+### 🧠 Enhanced LLM Integration
+- **Model switching**: Change models with the `/model` command
+- **Query optimization**: Automatically splits and rephrases queries for better results
+- **Multiple provider support**: Use OpenAI, Claude, Mistral, Google, xAI and more 
+- **API key rotation**: Built-in key management to avoid rate limits
+
+## Core Features (From Original llmcord)
 
 ### Reply-based chat system
 Just @ the bot to start a conversation and reply to continue. Build conversations with reply chains!
@@ -25,14 +48,16 @@ You can:
 Additionally:
 - When DMing the bot, conversations continue automatically (no reply required). To start a fresh conversation, just @ the bot. You can still reply to continue from anywhere.
 - You can branch conversations into [threads](https://support.discord.com/hc/en-us/articles/4403205878423-Threads-FAQ). Just create a thread from any message and @ the bot inside to continue.
-- Back-to-back messages from the same user are automatically chained together. Just reply to the latest one and the bot will see all of them.
 
 ### Choose any LLM
-llmcord supports remote models from:
-- [OpenAI API](https://platform.openai.com/docs/models)
-- [xAI API](https://docs.x.ai/docs/models)
+llmcord_search_engine supports remote models from:
+- [OpenAI API](https://platform.openai.com/docs/models) (including GPT-4o)
+- [Claude API](https://docs.anthropic.com/claude/reference/getting-started-with-the-api) (Claude 3 family)
+- [xAI API](https://docs.x.ai/docs/models) (Grok models)
 - [Mistral API](https://docs.mistral.ai/getting-started/models/models_overview)
 - [Groq API](https://console.groq.com/docs/models)
+- [Google API](https://ai.google.dev/models) (Gemini models)
+- [TogetherAI API](https://docs.together.ai/reference/models)
 - [OpenRouter API](https://openrouter.ai/models)
 
 Or run a local model with:
@@ -40,79 +65,168 @@ Or run a local model with:
 - [LM Studio](https://lmstudio.ai)
 - [vLLM](https://github.com/vllm-project/vllm)
 
-...Or use any other OpenAI compatible API server.
+## Project Structure
 
-### And more:
-- Supports image attachments when using a vision model (like gpt-4o, claude-3, llava, etc.)
-- Supports text file attachments (.txt, .py, .c, etc.)
-- Customizable personality (aka system prompt)
-- User identity aware (OpenAI API and xAI API only)
-- Streamed responses (turns green when complete, automatically splits into separate messages when too long)
-- Hot reloading config (you can change settings without restarting the bot)
-- Displays helpful warnings when appropriate (like "⚠️ Only using last 25 messages" when the customizable message limit is exceeded)
-- Caches message data in a size-managed (no memory leaks) and mutex-protected (no race conditions) global dictionary to maximize efficiency and minimize Discord API calls
-- Fully asynchronous
-- 1 Python file, ~200 lines of code
+The codebase has been completely restructured from a single file into a modular architecture:
 
-## Instructions
+```
+llmcord_search_engine
+├── commands/           # Discord slash commands
+├── config/             # Configuration handling
+├── core/               # Core bot functionality
+├── images/             # Image processing modules
+├── llm/                # LLM service and handlers
+├── providers/          # Content provider integrations
+├── search/             # Search functionality
+└── utils/              # Utility functions
+```
 
-1. Clone the repo:
+## Setup Instructions
+
+1. Clone the repository:
    ```bash
-   git clone https://github.com/jakobdylanc/llmcord
+   git clone https://github.com/yourusername/llmcord_search_engine
+   cd llmcord_search_engine
    ```
 
-2. Create a copy of "config-example.yaml" named "config.yaml" and set it up:
-
-### Discord settings:
-
-| Setting | Description |
-| --- | --- |
-| **bot_token** | Create a new Discord bot at [discord.com/developers/applications](https://discord.com/developers/applications) and generate a token under the "Bot" tab. Also enable "MESSAGE CONTENT INTENT". |
-| **client_id** | Found under the "OAuth2" tab of the Discord bot you just made. |
-| **status_message** | Set a custom message that displays on the bot's Discord profile. **Max 128 characters.** |
-| **max_text** | The maximum amount of text allowed in a single message, including text from file attachments.<br />(Default: `100,000`) |
-| **max_images** | The maximum number of image attachments allowed in a single message. **Only applicable when using a vision model.**<br />(Default: `5`) |
-| **max_messages** | The maximum number of messages allowed in a reply chain. When exceeded, the oldest messages are dropped.<br />(Default: `25`) |
-| **use_plain_responses** | When set to `true` the bot will use plaintext responses instead of embeds. Plaintext responses have a shorter character limit so the bot's messages may split more often. **Also disables streamed responses and warning messages.**<br />(Default: `false`) |
-| **allow_dms** | Set to `false` to disable direct message access.<br />(Default: `true`) |
-| **permissions** | Configure permissions for `users`, `roles` and `channels`, each with a list of `allowed_ids` and `blocked_ids`. **Leave `allowed_ids` empty to allow ALL. Role and channel permissions do not affect DMs. You can use [category](https://support.discord.com/hc/en-us/articles/115001580171-Channel-Categories-101) IDs to control grouped channel permissions.** |
-
-### LLM settings:
-
-| Setting | Description |
-| --- | --- |
-| **providers** | Add the LLM providers you want to use, each with a `base_url` and optional `api_key` entry. Popular providers (`openai`, `ollama`, etc.) are already included. **Only supports OpenAI compatible APIs.** |
-| **model** | Set to `<provider name>/<model name>`, e.g:<br /><br />-`openai/gpt-4o`<br />-`ollama/llama3.3`<br />-`openrouter/anthropic/claude-3.7-sonnet` |
-| **extra_api_parameters** | Extra API parameters for your LLM. Add more entries as needed. **Refer to your provider's documentation for supported API parameters.**<br />(Default: `max_tokens=4096, temperature=1.0`) |
-| **system_prompt** | Write anything you want to customize the bot's behavior! **Leave blank for no system prompt.** |
-
-3. Run the bot:
-
-   **No Docker:**
+2. Create a `.env` file from the example:
    ```bash
-   python -m pip install -U -r requirements.txt
-   python llmcord.py
+   cp .env.example .env
+   ```
+
+3. Edit the `.env` file with your Discord bot token, API keys, and settings:
+   - Get a Discord bot token from [Discord Developer Portal](https://discord.com/developers/applications)
+   - Add API keys for any providers you want to use (OpenAI, Claude, etc.)
+   - Configure search settings (SearxNG, Serper, etc.)
+
+4. (Optional) Set up a local SearxNG instance for search:
+   ```bash
+   docker run -d -p 4000:8080 searxng/searxng
+   ```
+
+5. Run the bot:
+
+   **Without Docker:**
+   ```bash
+   pip install -r requirements.txt
+   python main.py
    ```
 
    **With Docker:**
    ```bash
-   docker compose up
+   docker compose up -d
    ```
+
+## Configuration Reference
+
+The `.env` file supports the following configuration options:
+
+### Discord Bot Settings
+```
+BOT_TOKEN=your-discord-bot-token
+CLIENT_ID=your-discord-client-id
+STATUS_MESSAGE=your-bot-status-message
+```
+
+### Discord Permissions and Restrictions
+```
+ALLOW_DMS=true
+ALLOWED_CHANNEL_IDS=12345,67890  # Comma-separated IDs
+ALLOWED_ROLE_IDS=12345,67890     # Comma-separated IDs
+BLOCKED_USER_IDS=12345,67890     # Comma-separated IDs
+```
+
+### Message Limits
+```
+MAX_TEXT=100000                  # Max characters per message
+MAX_IMAGES=5                     # Max images per message
+MAX_MESSAGES=25                  # Max messages in conversation chain
+USE_PLAIN_RESPONSES=false        # Use plaintext or embeds
+```
+
+### LLM Provider Settings
+```
+# Each provider can have multiple comma-separated API keys
+OPENAI_API_KEYS=key1,key2
+CLAUDE_API_KEYS=key1,key2
+XAI_API_KEYS=key1,key2
+GOOGLE_API_KEYS=key1,key2
+MISTRAL_API_KEYS=key1,key2
+GROQ_API_KEYS=key1,key2
+OPENROUTER_API_KEYS=key1,key2
+```
+
+### Default Model Configuration
+```
+PROVIDER=openai                     # Default provider
+MODEL=gpt-4o                        # Default model
+EXTRA_API_PARAMETERS_MAX_TOKENS=4096
+EXTRA_API_PARAMETERS_TEMPERATURE=1
+```
+
+### Search Settings
+```
+SEARXNG_BASE_URL=http://localhost:4000  # Local SearxNG URL
+SERPER_API_KEYS=your-serper-api-key     # Fallback search
+BING_SEARCH_V7_SUBSCRIPTION_KEY=key     # Second fallback
+MAX_URLS=5                              # URLs to fetch per search
+```
+
+### Special Service Settings
+```
+YOUTUBE_API_KEYS=your-youtube-api-key
+REDDIT_CLIENT_ID=your-reddit-client-id
+REDDIT_CLIENT_SECRET=your-reddit-client-secret
+SAUCENAO_API_KEYS=your-saucenao-api-key
+IMAGE_GEN_API_KEYS=your-image-gen-api-key
+```
+
+## Usage Examples
+
+### Basic Conversation
+Just @ the bot and chat naturally. The bot will automatically use internet search when needed.
+
+### Custom Search
+```
+@bot please search for the latest updates on the James Webb Space Telescope
+```
+
+### Specialized Content Extraction
+```
+@bot summarize this YouTube video: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+```
+The bot will extract the video content, transcript, and comments, then use the LLM to provide an intelligent analysis.
+
+```
+@bot what are people saying about this Reddit post: https://www.reddit.com/r/science/comments/...
+```
+The bot will extract the Reddit post content and comments, then use the LLM to analyze sentiment and key points.
+
+### Image Analysis
+```
+@bot sauce [attach image]
+@bot lens [attach image] What is this object?
+```
+
+### Image Generation
+```
+/generateimage A futuristic cityscape with flying cars and neon lights
+```
+
+### Model Switching
+```
+/model provider: openai model: gpt-4-turbo
+/model provider: claude model: claude-3.7-sonnet
+```
 
 ## Notes
 
-- If you're having issues, try my suggestions [here](https://github.com/jakobdylanc/llmcord/issues/19)
+- The bot uses a round-robin approach for API keys, so adding multiple keys per provider helps avoid rate limits.
+- For best search results, set up a local SearxNG instance rather than relying on public instances.
+- If using vision models (GPT-4o, Claude 3, Gemini, etc.), ensure the correct provider is set along with its image-capable model.
+- The system prompt can be customized by editing `system_prompt.txt`.
 
-- Only models from OpenAI API and xAI API are "user identity aware" because only they support the "name" parameter in the message object. Hopefully more providers support this in the future.
+## Credits
 
-- PRs are welcome :)
-
-## Star History
-
-<a href="https://star-history.com/#jakobdylanc/llmcord&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=jakobdylanc/llmcord&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=jakobdylanc/llmcord&type=Date" />
-    <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=jakobdylanc/llmcord&type=Date" />
-  </picture>
-</a>
+- Built upon the original [llmcord](https://github.com/jakobdylanc/llmcord) by jakobdylanc
+- Uses [LiteLLM](https://github.com/BerriAI/litellm) for standardized LLM API access

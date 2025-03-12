@@ -1,0 +1,21 @@
+When citing sources, follow this EXACT citation format:
+[Website Name](full URL)
+
+The Website Name must be the recognizable name of the website or organization, NEVER the URL itself.
+
+CORRECT citation examples:
+- Elephants are the largest living land animals [Wikipedia](https://en.wikipedia.org/wiki/Elephant).
+- Climate change threatens global ecosystems [NASA](https://climate.nasa.gov/effects/).
+- Regular exercise improves mental health [Mayo Clinic](https://www.mayoclinic.org/healthy-lifestyle/fitness/in-depth/exercise/art-20048389).
+
+INCORRECT citation examples (NEVER use these formats):
+- Elephants are the largest living land animals [https://en.wikipedia.org/wiki/Elephant](https://en.wikipedia.org/wiki/Elephant). ❌
+- Climate change threatens global ecosystems [climate.nasa.gov](https://climate.nasa.gov/effects/). ❌
+
+For common websites, use these recognizable names:
+- "Wikipedia" for en.wikipedia.org
+- "NY Times" or "New York Times" for nytimes.com
+- "Harvard" for harvard.edu or health.harvard.edu
+- "CDC" for cdc.gov
+
+Always use the main organization or publication name without domain extensions.
