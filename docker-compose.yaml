@@ -1,7 +1,7 @@
+# Docker Compose configuration for the container.
+# The container is built from the Dockerfile in the current directory.
 services:
   container:
     build: .
     network_mode: host
     restart: unless-stopped
-    volumes:
-      - ./:/usr/src/app:ro
