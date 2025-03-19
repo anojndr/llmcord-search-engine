@@ -106,7 +106,7 @@ class LLMService:
             
         # Add base URL for xai provider
         if config["provider"] == "xai":
-            kwargs["base_url"] = "http://localhost:5000/v1"
+            kwargs["base_url"] = "https://grokaichat.onrender.com/v1"
             
         return kwargs
     
